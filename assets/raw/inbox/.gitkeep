@@ -1,0 +1,9 @@
+素材投递目录。
+
+把下载到的 GIF / PNG / WAV / TTF 全部丢进这里（不用分类，不用改名），
+然后在项目根目录执行：
+
+    python tools/intake.py            # 只看分派方案，不动文件
+    python tools/intake.py --apply    # 确认无误后落位
+
+详见 ../README.md

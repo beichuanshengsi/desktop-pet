@@ -1,0 +1,190 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "▶ 启动桌宠",
+      "detail": "运行 main.py，桌宠常驻桌面",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["main.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "✓ 冒烟测试（无界面自检）",
+      "detail": "无界面自检：素材加载 / 状态机 / 物理 / 存档 / 贴图朝向 / 多套素材 / 两个小游戏 / 菜单接线 / 离屏渲染（项数由脚本自己打印）",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/smoke_test.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "🔎 类型检查（Pylance 同一套规则）",
+      "detail": "用 pyright 扫 main.py / game / pet / tools。编辑器里只对打开过的文件刷新，这个能把漏看的报错一次列全",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/typecheck.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "⌕ 真实桌面透明验证",
+      "detail": "在真实桌面跑 2 秒并截屏，验证窗口是否真的透明置顶",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/verify_desktop.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "↔ 走路朝向验收",
+      "detail": "逐套真实窗口渲染「向右走/向左走」两帧，比像素并出图 reports/facing_fix.png",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/verify_facing.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "↔ 查看贴图朝向",
+      "detail": "看默认朝向与按套覆盖；要翻转把 args 换成 [\"tools/set_facing.py\", \"flip\"]（加 --set walk_a 只翻某套）",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/set_facing.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "🎨 重新生成图标",
+      "detail": "从当前素材裁头部，更新 assets/icon.png + icon.ico（托盘/窗口/任务栏）",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/make_icon.py", "--preview"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "⬓ 生成预览图",
+      "detail": "输出 preview_sheet.png 动作帧对照表 + 游戏/桌宠渲染图（都落进 reports/）",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/render_preview.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "⬆ 素材批量入库（先看方案）",
+      "detail": "扫描 assets/raw/inbox/，打印每个文件被判成什么动作、准备放哪儿，不动文件",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/intake.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "⬆ 素材批量入库（直接执行）",
+      "detail": "确认方案无误后落位：写进 custom_pet/ + 各素材目录，原文件挪进 _archive/",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/intake.py", "--apply"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "🖼 重裁游戏背景（接狗狗 · 蓝天草地）",
+      "detail": "从素材库重裁 -> assets/game/bg_catch.png，地平线 0.78，出预览图",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/prep_bg.py",
+               "assets/raw/_library/0921_1530_背景图/1789972756638_edit_459096029599217.png",
+               "--name", "bg_catch", "--ground", "0.78", "--preview"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "🖼 重裁游戏背景（弹跳得分 · 粉色舞台）",
+      "detail": "从素材库重裁 -> assets/game/bg_bounce.png，地平线 0.87，出预览图",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/prep_bg.py",
+               "assets/raw/_library/0921_1530_背景图/1789972701282_edit_459032437780997.png",
+               "--name", "bg_bounce", "--ground", "0.87", "--preview"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "🐾 真实桌面验收「逗它玩 / 喂一口」",
+      "detail": "在真实桌面把两个动作各演一遍并连拍 -> reports/actions_desktop.png",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/verify_actions.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "🎭 多套素材验收（随机换着演）",
+      "detail": "连点若干次，把每次真正画出来的那一帧拼成对照图 -> reports/variants.png",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/verify_variants.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "🚶 走路两套验收（交替播）",
+      "detail": "反复让宠物起步 6 次，每格标出这次用的套名 -> reports/walk_sets.png",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/verify_walk_sets.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "🪂 重力开关验收（下坠 / 悬停 / 中途改）",
+      "detail": "同一起点分别跑三种设置，抓真帧拼图并给出结论 -> reports/gravity_switch.png",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/verify_gravity.py"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "⚙ 安装依赖",
+      "detail": "pip install -r requirements.txt（装进当前选中的解释器）",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["-m", "pip", "install", "-r", "requirements.txt"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "✎ 处理表情包素材（示例）",
+      "detail": "把 assets/raw 里的表情包转成动作帧。先在下面 cmd 里改成你的文件名再运行",
+      "type": "shell",
+      "command": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "args": ["tools/prep_sticker.py", "assets/raw/你的表情.gif", "--state", "idle", "--auto-key"],
+      "options": { "cwd": "${workspaceFolder}", "env": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" } },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 运行产物与存档（开发态可写数据目录就在项目根）
+config.json
+config.json.tmp
+*.log
+
+# 预览/验证产物（随时可重新生成，不必入库）
+#   2026-09-21 起这些图从项目根目录改到了 reports/，规则跟着改。
+reports/preview_sheet.png
+reports/preview_motion.gif
+reports/shot_game.png
+reports/shot_gameover.png
+reports/shot_catcher.png
+reports/shot_catcher_over.png
+reports/verify_desktop.png
+reports/actions_desktop.png
+reports/facing_fix.png
+reports/variants.png
+reports/walk_sets.png
+reports/gravity_switch.png
+
+# 素材投递区 / 素材库：下载来的东西通常体积大且带版权，不进版本库。
+#   assets/raw/inbox/       投递口（只留 .gitkeep）
+#   assets/raw/_library/    整批下载的素材库归档（按批次建子目录）
+#   assets/raw/_archive/    加工完的原始文件归档（按 <时间戳>/ 分子目录）
+#   assets/raw/_snapshots/  历史成品快照（原图丢了时靠它重摆，见该目录 README）
+# 目录结构本身（各层的 README）要保住。
+assets/raw/*
+!assets/raw/README.md
+!assets/raw/inbox/
+assets/raw/inbox/*
+!assets/raw/inbox/.gitkeep
+
+# 编辑器
+.vscode/settings.json.bak
+.idea/
+*.swp
+
+# 报告产物
+reports/*.docx
+reports/*.pdf
+
+# 连拍/探针的中间截图
+reports/_tmp/
+reports/_tmp_actions/
+
+# 打包产物：能随时重建，且体积大（dist 151M / installer 49M），
+# 一旦 add -A 吃进去，想清掉就得改历史。
+#   注：安装脚本源码 installer.iss 在项目**根目录**，不受这条影响。
+dist/
+installer/
+build/
+

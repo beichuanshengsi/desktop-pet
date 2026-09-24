@@ -1,0 +1,948 @@
+# FACTS.md —— desktop-pet 单一事实源
+
+**规则**：本区只写"有原始输出为证"的事实，每条附证据行。引用任何数字前先 `grep FACTS.md`。
+`@版本` = 该结论所依据源文件的 MD5 前 8 位；源文件一改，对应条目即失效，需重验。
+
+---
+
+## 一、已验证事实（有原始输出为证）
+
+### F1 · custom_pet 落位帧数
+`custom_pet/` 共 **183** 张 png：idle 17 / walk 8 + walk_a 14（走路两套轮播）/ drag 23 / fall 0 /
+**sleep 22（2026-09-23 新增，见 F27）**，
+互动动作**各分三套** —— poke 9 + poke_a 14 + poke_b 20、feed 22 + feed_a 18 + feed_b 16
+（多套机制见 F18）；`fall` 无素材，运行时借 idle 兜底。
+- 证据：`for s in idle walk walk_a drag fall sleep poke poke_a poke_b feed feed_a feed_b; do echo "$s=$(ls custom_pet/${s}_[0-9][0-9].png|wc -l)"; done`
+  → idle=17 walk=8 walk_a=14 drag=23 fall=0 sleep=22 poke=9 poke_a=14 poke_b=20 feed=22 feed_a=18 feed_b=16
+- 证据：`ls custom_pet/*.png | wc -l` → 183
+- **2026-09-23 变动**：新增 `sleep` 22 帧（来源 GIF 反查确认，见 F27）。
+  原「161 张」作废。
+- **2026-09-22 变动**：`idle` 从「站姿挥手」（14 帧）换成「坐木凳晃腿」（17 帧），
+  换下来那 14 帧转去当 `walk_a`，走路变成两套轮播。此前「144 张」的旧值作废，见 F22。
+- 非 png 文件仅 `README.md` / `facing.json`。@`16b87e8f`(assets.py)（旧值，以 F8 为准）
+
+### F2 · custom_pet 位置（易踩）
+`custom_pet/` 在**项目根目录** `desktop-pet/custom_pet/`，**不在** `assets/pet/` 下。
+`assets/pet/` 是「内置素材」的落点，但**现在里面只有一份 README**
+（那 21 张由 assetgen 生成的 PNG 已于 2026-09-22 随生成器一起删除，见 F26）。
+- 证据：`find . -type d -name custom_pet` → `./custom_pet`
+- 证据：`ls assets/pet/` → 只有 `README.md`
+- 反例（错误的查法）：`ls assets/pet/custom_pet/*.png | wc -l` → 0，**不能**据此判断"没入库"。
+
+### F3 · 状态机已无 PLAY，互动拆成两个独立状态（2026-09-23 新增 SLEEP）
+`pet/behavior.py` 的 `State` = `IDLE/WALK/DRAG/FALL/POKE/FEED` + **`SLEEP`**（7 个，SLEEP 见 F27）；
+全文件 grep `PLAY|jump` **无匹配**。
+**状态名的唯一来源就是 `State`**：`assets.STATES` 与 `prep_sticker.VALID_STATES` 都从
+`behavior.KEYS` 派生（`KEYS = tuple(s.value for s in State)`），不再各抄一份（见 F26）。
+`FPS`：IDLE 7.0 / WALK 11.0 / DRAG 13.0 / FALL 7.0 / **POKE 12.5** / **FEED 10.0** / **SLEEP 4.0**。
+（SLEEP 特意压到 4fps：素材原速约 12.5fps，会像抽搐；4fps 下一个循环 5.5 秒，像在慢慢呼吸翻身。）
+`ONESHOT = (State.POKE, State.FEED)`，`ONESHOT_FALLBACK = 1.0`。
+`pet/assets.py` 的 `STATES` 直接从 `behavior.KEYS` 派生（不再是手写元组）。
+- 证据：`grep -n "class State" -A 12 pet/behavior.py`；`grep -rn "PLAY\|jump" pet/behavior.py pet/assets.py` → 空
+- 证据：`grep -n "FPS = " -A 11 pet/behavior.py`；`grep -n "from .behavior import KEYS" pet/assets.py`
+
+### F4 · 冒烟测试现状
+`tools/smoke_test.py` **234 项通过 / 0 失败**（输出末行「通过 234 项，失败 0 项 / 全部通过」）。
+覆盖：素材加载（含**多套素材解析**、缺状态借 `idle` 兜底）、存档读写（含坏档）、状态机、
+物理、朝向（含**按套覆盖**）、互动动作时长与冷却、**「重力下坠」开关关掉后真的不下坠**、
+**养成状态（在线/离线衰减、阈值、睡觉回精力）**、**甩出去（手速判定与钳制）**、
+**金币折算与小卖部买卖**、**番茄钟计时与只响一次**、**接狗狗的骨头回血与带风漂移**、
+两个游戏的规则与结算、菜单接线、游戏素材前缀自动发现、
+**一个动作多套素材的随机挑选与"连续两次不重复"、多套素材下真实渲染一帧**、
+**walk 起步挑套 / 行走途中不换套 / 两套 walk 都真实渲染一帧、walk 每套左右走画出的帧不同**、
+（两个游戏各离屏渲染一帧）、
+**两个游戏窗口继承 `GameWindow` 且没有各抄一份 `closed` 信号**。
+- 证据：`"C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe" tools/smoke_test.py | tail -3`
+  → 实测「通过 234 项，失败 0 项 / 全部通过」
+- **2026-09-23 午（见 F27，v2.0.0）**：新增 5 段共 **83 条** ——
+  **养成状态**（衰减率、边界钳制、离线下限、吃饱/逗乐/睡觉回精力、饥饿与疲惫阈值、
+  `tired`/`rested` 滞回不抖动）、**甩出去**（`VelocitySampler` 估速、过窗口的点被丢、
+  `clamp_fling` 上下限钳制、轻放不甩）、**小卖部与金币**（`coins_for` 折算、**没结算不给钱**、
+  买东西扣款与生效、**钱不够时商品项全灰掉且不把分隔线算成可点项**）、
+  **番茄钟**（`tick` 只在到点返回一次 `True`、`progress`/`label`）、
+  **接狗狗·骨头与漂移**（骨头给分与回血、满血不超上限、带风落体撞墙反弹）。
+  另把老断言「游戏菜单接线」改成**按标题找「一起玩游戏」子菜单**（右键菜单现在有 3 个子菜单，
+  原来的"只有 1 个子菜单"假设失效）。项数 **151 → 234**，原「151 项 / 159 项」作废。
+- **2026-09-22 傍晚（见 F26）**：素材段改写 —— 原来跑 `pet.styles` 的两套生成器循环，
+  现改为在**临时目录现造纯色 PNG**（默认套 + 套 a，各 2 帧）验 `AssetBank`，
+  真实素材目录只读。`SPRITE[...]` 断言改用 `State.POKE.value / State.FEED.value`。
+  项数 **159 → 149**，原「159 项」作废。
+- **同批新增 2 条**（版本号段）：`CHANGELOG.md 存在`、
+  `CHANGELOG 首条版本号与 __version__ 一致` —— 版本号写在 `pet/__init__.py` 与
+  `CHANGELOG.md` 两处，必须有断言盯着它们别漂。项数 **149 → 151**。
+- 2026-09-21 17:40 新增 9 条：`GameWindow 自己声明了 closed`、
+  `MiniGame/CatchGame 继承 GameWindow`、`MiniGame/CatchGame 没有另抄一份 closed`、
+  `create_game(...)` 的窗口是 `GameWindow`、`实现了 _step / _reset_scene`。
+- 2026-09-22 下午新增 6 条：`walk 有多套素材可选`、`每次起步都会重新挑套`、
+  `两套 walk 素材交替（不连着重复同一套）`、`行走途中不换套（一趟走法保持一致）`、
+  `walk 的套「默认」/「a」能渲染出一帧`（8 帧 / 14 帧）。
+  实测交替序列 = `a - a - a - a -`（`-` 指默认套）。原「134 项」作废。
+- **2026-09-22 傍晚新增 10 条**（按套朝向，见 F24）：`按套朝向能读回，非法值直接丢`、
+  `按套朝向按素材前缀查：walk_a 被覆盖成朝右`、`没单独声明的套跟随目录默认`、
+  `套名不跨状态串台：poke_a 不受 walk_a 影响`、`只改总朝向不会抹掉按套声明`、
+  `显式传空表 = 清掉按套声明`、`现役素材 默认套：向右走要镜像`、
+  `现役素材 walk_a：向右走不镜像（按套声明生效）`、
+  `套「默认」/「a」左走/右走画出的帧不一样（镜像真的生效）` ×2。
+- **2026-09-22 夜新增 9 条**（重力开关，见 F25）：`物理层：不给重力就不动`、
+  `关掉重力：悬在半空不下坠`、`打开重力：照旧落到地面并站住`、
+  `关掉重力时点击不起跳（否则会一路飘到天花板）`、`关掉重力不影响逗它玩本身`、
+  `关掉重力：松手不进 FALL（它等不到落地）`、`关掉重力：松手停在哪就悬在哪`、
+  `打开重力：松手照旧进 FALL`、`下坠途中关掉重力：立刻退出 FALL，不留半空演下坠`。
+  实测：起点 y=83，勾选跑到 y=647（下坠 564px）、不勾 y 恒为 83、中途关掉停在 193。
+  原「150 项」作废。
+- 版本：@`f727b687`(smoke_test.py) @`c43f489d`(minigame.py) @`ed39e56e`(catcher.py)
+  @`2f766fef`(common.py) @`ff04b371`(vitals.py) @`9805fd8b`(pomodoro.py)
+  @`3919a9b5`(behavior.py) @`80c94d10`(window.py)
+
+### F5 · 桌宠 5 个状态的素材来源与缩放参数（2026-09-21 下午这批）
+从素材库 `assets/raw/_library/0921_1530_线条小狗GIF/` 挑 5 个 GIF，用
+`prep_sticker.py --custom --scale <绝对值>` 逐状态落位（**不是** `intake.py` 批量入库）：
+
+| 状态 | 源文件 | 源尺寸/帧 | 输出帧 | `--scale` | 内容高 |
+|---|---|---|---|---|---|
+| walk_a（2026-09-22 前是 `idle`） | `xian_tiao_xiao_6024_线条小狗.gif` | 360×360 / 14f | 14 | 0.4564 | 100 |
+| walk | `xian_tiao_xiao_5197_线条小狗C (82).gif` | 500×493 / 8f | 8 | 0.4000 | 94 |
+| drag | `xian_tiao_xiao_6588_线条小狗害怕.gif` | 240×240 / 23f | 23 | 0.7383 | 95 |
+| poke | `xian_tiao_xiao_3411_线条小狗 (307).gif` | 240×240 / 9f | 9 | 0.9000 | 99 |
+| feed | `xian_tiao_xiao_218_线条小狗表情包动图 (2).gif` | 360×360 / 22f | 22 | 0.5046 | 109 |
+
+- 证据：`for name in <上列 5 个>; do Image.open(L/name) 打印 size/n_frames; done` → 尺寸与帧数如上
+- 证据：各状态内容高由 `getbbox()` 量出，中位数 100/94/95/99/109（128 画布，底边均为 y=122）
+- 另有给 poke/feed 各配的 2 套备选（poke_a/poke_b/feed_a/feed_b），来源与参数见 F18。
+- **`idle` 已不在这批里**：2026-09-22 换成 17 帧「坐木凳晃腿」，来源是
+  `assets/raw/_snapshots/线条小狗晃脚脚2_idle/`（原 GIF 已丢失），
+  用 `tools/rebuild_from_snapshot.py` 按 ×1.26 重摆 —— 详见 F22。
+- 上一轮成品备份：`assets/raw/_snapshots/pre_1550/`（76 张 png + README + facing.json）；
+  原 GIF 在 `assets/raw/_archive/0921_1400/`。@`3076e6cb`(prep_sticker.py)
+- **本轮（2026-09-23）新增第 7 个状态 `sleep`**：`xian_tiao_xiao_5191_线条小狗C (13).gif`
+  （250×250 / 22f / **黑底**），自动缩放 0.7436，内容 112×62 —— 来源用像素反查确认，
+  详见 F27。本表因此只覆盖"2026-09-21 那批 5 个状态"，**不是当前全部状态的清单**。
+
+### F6 · 朝向声明
+`custom_pet/facing.json` = `{"base":"left","sets":{"walk_a":"right"},"note":…}`。
+`base` 是**整个目录**的默认（脸在左、后腿在右，向右走时要镜像）；
+`sets` 是**按套覆盖**表，key = 素材前缀（`walk_a`），见 F24。
+- 证据：`cat custom_pet/facing.json`；`tools/set_facing.py` 输出
+  「默认朝向 朝左 / 按套 walk_a -> 朝右 / [默认套] 向右走要镜像 / [walk_a] 向右走不镜像」
+- ⚠️ `verify_facing.py` 的数字比对**不能**作为"朝向声明填对了"的证据：它读的就是声明，
+  只能证明"绘制与声明一致"（`head_side()` 拿 base 反推头朝哪边）。
+  声明对不对只能靠人眼看图里第一行的"素材原图 / 水平镜像"。
+  2026-09-22 的 `walk_a` 就是这种情况 —— 代码没错，是声明漏了一套。
+- @`0890187f`(pet/facing.py) @`a469a5e4`(tools/set_facing.py)
+
+### F7 · 验收产物实体（全部在 `reports/`）
+2026-09-22 傍晚（按套朝向改完之后）实测字节数：
+`preview_motion.gif`（**128 帧**，2494829 B）、`preview_sheet.png`（463739 B）、
+`verify_desktop.png`（19620 B）、`actions_desktop.png`（299574 B）、
+`facing_fix.png`（**214808 B**，2026-09-22 傍晚改成"逐套"布局后变大，原 109192 B）、
+`variants.png`（235271 B，多套素材验收，见 F19）、
+`walk_sets.png`（243058 B，走路两套素材验收，见 F19 —— 字节数与改朝向之前差 3 B，
+因为图里那两帧真的跟着翻转了）、
+`gravity_switch.png`（192761 B，816×1144，「重力下坠」开关验收，见 F25 ——
+连跑两次 md5 都是 `6c7bbab7cfbe0e32f5d1f9b24509589a`，可复现）。
+
+**2026-09-23 午新增 3 张**（v2.0.0 五大玩法，见 F27）：
+
+| 产物 | 尺寸 | 可复现？ | 说明 |
+|---|---|---|---|
+| `vitals_curve.png` | 1042×776 | **可复现**（连跑两次 md5 均 `0e039b55405ac26aa5725059c2ab576d`） | 36 小时养成曲线 + 睡眠区间色带，用**真实 `PetWindow._advance` 循环**跑出来 |
+| `fling_throw.png` | 632×1054 | ✗（手速靠真实时钟采样，每跑略变） | 4 种松手方式的真实轨迹，见 F28 |
+| `catch_items.png` | 990×1078 | ✗（落点与风向随机） | 真实游戏画面 + 带风落体 `x(t)` 轨迹 + 骨头占位形象 |
+
+**游戏截图不做基准**：`shot_game.png` / `shot_gameover.png` / `shot_catcher.png` /
+`shot_catcher_over.png` 每次跑都会变（道具与小狗的落点是随机的），
+实测同一份代码连跑两次 `shot_game.png` 的 md5 就不同 —— 只能看，不能当判据。
+- 可复现的只有 `preview_motion.gif` 与 `preview_sheet.png`：连跑两次 md5 一致
+  （`0cae756b…` / `2cd17f38…`），可作为"预览链没被动过"的判据 ——
+  但它们**依赖当前素材与代码**（08:00 与 16:00 两次测得的值都不同，改朝向也会变），
+  **别当成跨素材的常量**，改完东西必须重测。
+**项目根目录不再有任何 png/gif**（`render_preview.py` / `verify_desktop.py` 已改为直接写 `reports/`）。
+- 证据：`ls -la reports/*.png reports/*.gif`；`ls *.png *.gif` → 空
+- 证据：`render_preview.py` 输出 `[preview] preview_motion.gif  128 帧  2436 KB` @`f981f760`
+- ⚠️ 踩坑记录：加多套素材后，`render_preview.py` 里的 `glob("poke_*.png")` 一度把三套
+  拼成一条序列（动图变 190 帧、对照表写成"poke 43 帧"）。改用
+  `pet.assets.set_files()`（当时叫 `default_set_files`）只取默认套后恢复正常。
+  脚本读素材**不能**裸 glob。
+- 修正记录：2026-09-21 傍晚之前这 7 张是写在项目根目录的（见 V6）。
+- 注：动图帧数（128）与 `preview_sheet.png` 的字节数**依赖当前素材与代码**
+  （2026-09-22 换掉 idle 之前是 122 帧 / 454267 B；同一天改朝向之前是 2454143 / 459156 B），
+  但在源文件不动时是稳定值，可以当"预览链没被动过"的判据 ——
+  **别当成跨素材的常量**。
+`reports/` 下另有几份一次性检查图（`pet_states_check.png` 355758 B、`walk_motion_AB.png`
+453650 B、`walk_desktop.png` 203919 B、`icon_check.png` 93291 B、`icon_preview.png` 66420 B、
+`size_compare.png` 95898 B、`user_gifs_raw.png` 98114 B、`idle_compare.png` 176846 B、
+`scale_probe.png` 362757 B），不是每次跑都生成。
+
+### F8 · 源文件指纹（本条即全局 @版本 基准）
+`md5sum` 于 **2026-09-23 午**（v2.0.0 五大玩法落地之后，见 F27）重采：
+```
+b7090d586245fbc57f0733777e8c3237  main.py                        （接番茄钟完成信号 -> 托盘气泡）
+609efc1d87f4a920cb022dbd719a2ea0  pet/__init__.py                （__version__ 1.0.0 → 2.0.0）
+e7839e634e8570bdf10e1e9b3a07419d  game/__init__.py               （转出 COIN_PER_SCORE / coins_for）
+2f766fef9621059c2340a2115cd382b9  game/common.py                 ★新增金币折算 COIN_PER_SCORE / coins_for / _award_coins
+c43f489d1e97d212bb4152bf8e48be36  game/minigame.py               （结算发金币）
+ed39e56edd20be9f26712accf0a712b8  game/catcher.py                ★新增骨头落体 + 水平漂移（风）+ 结算发金币
+17a44b33dc5c1cf6a53d51adbe0112c3  pet/paths.py
+d99338acc2cda8003a0eb9faad259280  pet/config.py                  ★新增 satiety/mood/energy/coins/last_seen + 时间戳
+164541b988a5f9d8a1d5cb60ecd3973d  pet/menu.py                    ★新增 SHOP / POMODORO_CHOICES + add_shop / add_pomodoro / add_vitals
+ff04b37183163251f8474ab782eb00f7  pet/vitals.py                  ★新增：养成状态（饱食/心情/精力，含离线衰减与阈值）
+9805fd8b7a96e8a88fe2287d7514663a  pet/pomodoro.py                ★新增：番茄钟计时（tick 只在到点返回一次 True）
+80c94d10643222789ff39c830914fac8  pet/window.py                  ★新增甩出去 / 养成 tick / 讨饭走向中点 / 番茄钟 / 买卖
+53808cae683e4c939b728a8fea7244ce  pet/tray.py                    ★新增动态金币与养成项 + 小卖部/番茄钟子菜单
+3919a9b5ff0e00323274631885a5b340  pet/behavior.py                ★新增 SLEEP 状态 + 滞回（rested）+ seek（走向中点）
+77d71c7421dc2b9909cfe468629ca961  pet/facing.py
+45ea83f2f28d41ca312cf04a236b796b  pet/icon.py
+358a908ec3fb28951593e6df5cced09d  pet/assets.py
+dbbd40d971831fd4f2449721984441f2  pet/anim.py                    （补登记：此前漏在表外）
+9134f847ccbf166f7ab6a02b9abafac0  pet/physics.py                 ★新增 VelocitySampler / clamp_fling / FLING_*（补登记）
+284f6ed5453abd0cb4507b83442507e6  tools/prep_sticker.py
+6d9529f7c36b51f8f3e71135ea75ac25  tools/prep_bg.py
+86bd34e3508af85015a949cb787b8749  tools/intake.py
+71c6e79a038e79f9c8a545c58371eb08  tools/render_preview.py
+f727b687c512514556af451cf130cb72  tools/smoke_test.py            （+5 段共 83 条，见 F4）
+1995849ed4204c8f758b91df408c19ab  tools/typecheck.py
+c4aedbe4301a671623b050f92ea9e1fe  tools/verify_desktop.py
+f0e9875c661b5c019b4edaeecb6daffc  tools/review_materials.py
+807da7b72d8afc94f8cd113b6da576b0  tools/verify_facing.py
+d679fba574a6a7c0e6245477542855a5  tools/verify_actions.py
+936e5526fe3ed4868b435d68777bc66d  tools/verify_variants.py
+386d39f0ed978cc361e0f974116fd772  tools/verify_walk_sets.py
+af62748bc966b04916aed03d7c12a79e  tools/verify_gravity.py
+40d6b6bf1d41eeec26c18aaffb934319  tools/verify_fling.py          ★新增（甩出去验收）
+54baf54aebc183ac95c15d68fff4ffca  tools/verify_vitals.py         ★新增（养成曲线验收）
+d9dbcea7e911dbd4888ba3801483c4ef  tools/verify_catch_items.py    ★新增（骨头+漂移验收）
+ec77b118e95562fee15c5d539d379027  tools/rebuild_from_snapshot.py
+90099636f4eaeae58672f65a04ac5e1f  tools/make_icon.py
+dc8dfbf5d2728da8ffd8c47e0e0d2e66  tools/set_facing.py
+```
+**已删除、不再有指纹**（见 F26）：`pet/assetgen.py`、`pet/assetgen_line.py`、`pet/styles.py`、
+`tools/gen_assets.py`、`tools/make_fixtures.py`、`tools/fixtures/`、`assets/pet/*.png`、`.style_cache/`。
+
+> 改动上述任一文件后，本表中引用该文件 @版本 的条目需重新验证。
+> 最近一次变动（**2026-09-23 午**）：v2.0.0 五大玩法（甩出去 / 养成状态 / 金币小卖部 /
+> 接狗狗骨头+漂移 / 番茄钟）。**素材只增未减** —— `custom_pet/` 161 → 183 张
+> （+`sleep_*` 22 帧，见 F27），`assets/game/` 40 张、`assets/raw/` 全在。
+> F1 / F5 / F18 / F24 / F25 的结论继续成立；F4 的项数与 F7 的产物清单按 F27 重测。
+> 更早的变动见 V11 / V12 与 F26 末尾的时间线。
+
+### F9 · 小游戏清单与接线
+`game/__init__.py` 的 `GAMES` = `(("bounce","弹跳得分",…), ("catch","接狗狗",…))`，
+标识唯一；托盘菜单与桌宠右键菜单都遍历它生成「一起玩游戏」子菜单。
+`create_game("bounce")` → `MiniGame`；`create_game("catch")` → `CatchGame`。
+**2026-09-23（v2.0.0）**：两个游戏**结算时都发金币** ——
+`GameWindow._finish()` 里调 `_award_coins()`，折算率是 `game/common.py` 的
+`COIN_PER_SCORE = 10`（**10 分 = 1 金币**）；`game/__init__.py` 转出 `COIN_PER_SCORE` / `coins_for`。
+**只在结算发钱**（中途关窗口不给，见 F27）。
+- 证据：`smoke_test.py` 的「游戏菜单接线」段全通过；子菜单文本实测 `['弹跳得分','接狗狗']`，
+  触发后发出的标识实测 `['bounce','catch']` @`e7839e63`(game/__init__.py)
+- 证据：`grep -n "COIN_PER_SCORE\|def coins_for\|_award_coins" game/common.py`；
+  实测 `coins_for(999) == 99`、`coins_for(-5) == 0`
+- 证据：`pet/tray.py`、`pet/window.py` 的菜单均为 `addMenu("一起玩游戏")` + 遍历 `GAMES`
+
+### F10 · 接狗狗的玩法常量
+`MAX_HP=5`、`PUPPY_SCORE=10`、`COMBO_STEP=5`、`COMBO_BONUS=10`、`DAMAGE_PER_HIT=1`、
+`GRACE_SPAWNS=3`、`MAX_BOMB_STREAK=2`、`RAMP_TIME=75.0`；
+出怪间隔 0.95→0.45s，炸弹率 0.16→0.44，下落速度 180→360 px/s（`ramp = min(1, survived/75)`）。
+实测：难度 t=0 时 0.95s/0.16/162px·s⁻¹，t=75 时 0.45s/0.44/327px·s⁻¹。
+**2026-09-23（v2.0.0）新增两类常量**（见 F27）：
+- **骨头**：`BONE_SIZE=46`（比炸弹小一圈）、`BONE_SCORE=10`、`BONE_HEAL=1`、
+  `BONE_MIN_RAMP=0.30`（难度过 30% 才可能出现）、`BONE_CHANCE=0.12`。
+  `FALLER_KINDS = ("puppy","bomb","bone")`。骨头的抽取**排在"连续炸弹"规则之前**，
+  不会被 `MAX_BOMB_STREAK` 连带压掉。
+- **风（水平漂移）**：`DRIFT_MIN_RAMP=0.40`、`DRIFT_MAX=130.0`、`DRIFT_CHANCE=0.55`、
+  `DRIFT_SPEED_MIN_RATIO=0.45`（单个落体风速取 45%~100% 的 `DRIFT_MAX`）。
+  带风的落体 `edge_bounce=True` + `restitution=1.0`（撞左右墙**弹回**）。
+  **骨头不给风**。
+- 证据：`grep -n "^BONE_\|^DRIFT_\|^FALLER_KINDS" game/catcher.py`
+- 证据：`smoke_test.py` 的「难度：出怪间隔变短 / 炸弹出现率升高 / 下落速度变快」三条
+  → `0.95s -> 0.45s`、`0.16 -> 0.44`、`162 -> 327 px/s` @`c2d65504`(旧版)
+- 证据：`python tools/verify_catch_items.py` → 「真帧里三种落体各 2 根骨头、2/7 个带漂移」、
+  「6 根落体里 4 根撞到左右墙并弹回」
+- 证据：随机 500 次出怪实测最长连续炸弹 = 2（上限 `MAX_BOMB_STREAK`），
+  前 3 个必是小白狗 @`c2d65504`（本轮改动前）
+
+### F11 · 扣血规则（实测）
+* 接住小白狗：+10 分、**不**扣血、`caught` +1；连击满 5 只额外 +10（实测 4→5 时得 20 分）。
+* 接到炸弹：扣 1 滴血，连击清零。
+* 漏接小白狗（落到底）：扣 1 滴血。
+* **炸弹落到底：不扣血**（只有"接到"才算）。
+* **骨头（v2.0.0）**：+10 分，**有伤时回 1 滴血**（`BONE_HEAL=1`），满血时只加分、
+  **不超上限**；漏接骨头**不扣血**（它本来就不是必须接的）。
+* 血量扣光 → `over=True`，标题「血量耗尽！本局得分 N」。
+- 证据：`smoke_test.py` 的「接狗狗小游戏」段对应 6 条断言全部 PASS @`c2d65504` `7424b17d`
+- 证据（骨头，v2.0.0）：`smoke_test.py` 的「接狗狗：骨头与漂移」段 ——
+  「骨头给分」「有伤时骨头回 1 滴血」「满血时骨头只加分不超上限」三条**
+- 证据：`game/catcher.py` 的 `_on_bone()`（`heal` 终于有人调了）@`ed39e56e`
+
+### F12 · 两个游戏互不干扰的最高分（+ 金币是共用的）
+「弹跳得分」写 `cfg.best_score`，「接狗狗」写 `cfg.best_catch`，各记各的。
+实测：接狗狗结算写入 `best_catch=210` 时，`best_score` 保持 80 不变。
+**v2.0.0 起金币是"共用一个钱包"**：两个游戏结算都往 `cfg.coins` 里加
+（`coins_for(score)`），小卖部从同一个 `cfg.coins` 扣 —— 这是有意的（钱就该是通用的）。
+- 证据：`smoke_test.py` → `[PASS] 最高分写入 cfg.best_catch (best_catch=210)`、
+  `[PASS] 没碰到弹跳得分的最高分 (80)` @`c2d65504` `d99338ac`(pet/config.py, 新值)
+- 证据（金币，v2.0.0）：`smoke_test.py` 的「小卖部与金币」段 ——
+  「结算按 10 分 = 1 金币折算」「没结算就关掉窗口不给金币」「买东西扣金币并生效」
+  「钱不够买不了」全部 PASS @`2f766fef`(game/common.py)
+
+### F13 · 游戏素材已到位
+`assets/game/` 实测：`catcher_*` **8** 张、`puppy_a_*` **10** 张、`puppy_b_*` **10** 张、
+`puppy_c_*` **10** 张、`bg_bounce.png` 1 张、`bg_catch.png` 1 张；**`bomb_*` 为 0**
+（炸弹仍走代码画的线条卡通占位 `_draw_bomb_placeholder()`）。
+- 证据：`ls assets/game/*.png | sed 's/_[0-9]*\.png//' | sort | uniq -c`
+  → `8 catcher / 10 puppy_a / 10 puppy_b / 10 puppy_c / 1 bg_bounce / 1 bg_catch`
+- 证据：离屏实例化 `CatchGame` 后 `len(g.puppy_sets)==3`、各套帧数 `[10,10,10]`、
+  `len(g.sprites['catcher'])==8`、`len(g.sprites['bomb'])==0`、`g._bg is not None` @`c2d65504`
+- ⚠️ catcher 曾一度是 **14** 张（旧素材），已换成 `#5197` 张臂那套，**只有 8 帧**。
+  旧记述见 V7。
+
+### F13b · 游戏素材的来源与复现（逐字节可复现）
+4 张源 GIF 取自 `assets/raw/_library/0921_1530_线条小狗GIF/`，命令见
+`assets/game/README.md` 的「这几张是怎么来的」；2026-09-21 实测四条
+`prep_sticker.py` 命令的输出与 `assets/game/` 里的文件 **`cmp` 全等**。
+输出画布 catcher 160×160（内容 145×129）、puppy_* 96×96（内容 80×79 / 80×78 / 81×73）。
+- 证据：`prep_sticker.py <源> --state catcher --size 160 --keep 10 --out <临时目录>` 等四条，
+  之后 `for f in assets/game/catcher_*.png; do cmp -s $f <临时目录>/$(basename $f); done`
+  → `catcher 相同 8 / 不同 0`、`puppy_a 10/0`、`puppy_b 10/0`、`puppy_c 10/0`
+- 证据：`Image.open('assets/game/*_00.png')` → `(160,160)` / `(96,96)`；`getbbox()` 如上行
+- ⚠️ 这批源是爱给网**预览图**，带不透明浅灰斜排水印（58px 显示尺寸下不可见，
+  2 倍放大可见）。检测方法见 `reports/README.md`。@`3076e6cb`(prep_sticker.py)
+
+### F14 · 两张背景图规格与地平线对齐
+`assets/game/bg_bounce.png` 与 `bg_catch.png` 均为 **780×580**（等于游戏窗口 `W×H`）；
+游戏 `GROUND_Y = 534`。两张图由 `tools/prep_bg.py` 从
+`assets/raw/_library/0921_1530_背景图/` 的 2848×1600 原图按 `--ground` 裁出，
+使源图地平线落在 y=534：
+
+| 输出 | 源文件 | `--ground` |
+|---|---|---|
+| `bg_bounce.png` | `1789972701282_edit_459032437780997.png` | 0.87 |
+| `bg_catch.png` | `1789972756638_edit_459096029599217.png` | 0.78 |
+
+- 证据：`from game.common import W,H,GROUND_Y` → `780 580 534`；
+  `Image.open('assets/game/bg_*.png').size` → `(780, 580)`
+- 证据：上表两条 `prep_bg.py` 命令输出到临时目录后 `cmp` → **与 `assets/game/` 里的逐字节一致**
+  （2026-09-21 复验，此前只验到"最大像素差 = 1"）@`fa965e67`
+
+### F15 · 小白狗套的前缀靠扫目录，不是写死的表
+`game/catcher.py` 的 `discover_puppy_prefixes(root)` 扫 `puppy*.png` 去序号得前缀；
+`CatchGame.__init__` 用它装 `self.puppy_sets`。空目录时退回 `PUPPY_PREFIXES`。
+- 证据：`discover_puppy_prefixes(assets/game)` → `['puppy_a','puppy_b','puppy_c']`；
+  `discover_puppy_prefixes(Path('__nope__'))` → `['puppy','puppy_a','puppy_b','puppy_c']`（兜底表）
+- 证据：`smoke_test.py` 3 条新断言（套数 = 目录实际套数 / 每套非空 / 空目录走兜底）全 PASS @`c2d65504`
+
+### F16 · 验收/预览工具都不会写用户的 `config.json`
+`tools/render_preview.py` 的 `isolate_config()`、`tools/smoke_test.py` 的
+`pcfg.config_path = lambda: tmp`，都把 `pet.config.config_path` 指向临时文件。
+2026-09-23 新增的三个验收脚本（`verify_fling.py` / `verify_vitals.py` /
+`verify_catch_items.py`）**都带了同一个 `isolate_config()`** ——
+它们各自会实例化 `PetWindow` / `CatchGame`，`closeEvent` 里那条
+`Config.save()` 不隔离就会把用户的存档覆盖掉。
+**用只读锁做了确定性验证**：`attrib +R config.json` 之后跑完
+`smoke_test.py` + `render_preview.py`（都正常退出、无写入报错），解锁后与锁前内容比对，
+**只有 `pos_x` 差 1**（那是正在运行的桌宠自己走了一步写的），其余字段一字未变。
+- 证据：`cp config.json bak && attrib +R config.json && python tools/smoke_test.py && python tools/render_preview.py && attrib -R config.json && diff bak config.json`
+  → 唯一差异 `"pos_x": 1305` vs `"pos_x": 1304`
+- **2026-09-23 复验（v2.0.0，把 3 个新脚本一起纳入）**：
+  `cp config.json /tmp/bak && attrib +R config.json` 之后依次跑
+  `verify_fling.py` / `verify_vitals.py` / `verify_catch_items.py` / `smoke_test.py`
+  → **四个 exit code 全为 0，`diff` 与备份完全一致（零差异）**
+  （这次连 `pos_x` 都没差 —— 因为 `config.json` 被锁住，正在跑的桌宠也写不进去）。
+- 修正记录：`render_preview.py` 在加 `isolate_config()` **之前**是会写的（截结算图触发
+  `_finish()` → `cfg.save()`），见 V3。
+  2026-09-21 17:40 复验（`render_preview.py` / `verify_facing.py` / `verify_actions.py` /
+  `verify_variants.py` 都跑过之后 `config.json` 的 md5 与跑前一致；`verify_actions.py`
+  自己打印「config.json 被改动过，已还原为运行前的版本」后仍然一致）@`f981f760` `7424b17d`
+- ⚠️ **新增验收脚本时务必照抄 `isolate_config()`**（照 `verify_fling.py` 第 64 行那几行走）——
+  漏了不报错，只表现为"跑完测试发现桌宠位置/统计变了"。
+
+### F17 · 素材库那批 GIF 的水印性质（决定了"怎么检测"）
+`assets/raw/_library/0921_1530_线条小狗GIF/` 是爱给网的**预览图**，狗身上盖着一层
+**不透明**浅灰的斜排 `aigei.com` 水印（alpha=255，与狗身同为实心像素）。
+- **"半透明像素占比"检测不到它** —— `_static_light_alpha()` 的判据是 `0 < a < 200`，
+  水印 a=255，直接被过滤，实测数出来的值主要来自素材自带的半透明道具（非水印）。
+- 试过"静止浅灰像素占比""净空区浅灰占比（加 `MaxFilter(7)` 腐蚀）"两种改法，
+  **都与人工标注对不齐**：白狗自身的抗锯齿边和水印得分几乎一样。
+- **可靠做法只有看**：垫中性灰 `#8C8F96`、每格放大到 300px+、编号拼图，然后人眼过。
+  这就是 `make_sheet()` / `make_strip()` 垫灰底、以及 `reports/README.md`
+  建议 `--cell 320 --cols 6` 的原因。
+- 影响面：58px 的游戏显示尺寸下**看不出来**，2 倍以上放大可见。故本轮**不做去水印**
+  （不可靠，且属绕开站点版权标识），保留现有素材并在 README 里注明。
+- 证据：`Image.open(<源>).getpixel(<水印处>)` → alpha=255、RGB 约 (200~230) 中性灰；
+  `assets/game/` 放大渲染（垫灰 `#8C8F96`，每格 320px）肉眼可见斜排 `aigei`
+- 证据：标注 8 个样本（#129/#050 干净，#006/#246/#222/#5207/#132 有水印）后跑两种指标，
+  **均至少 1 例与标注相反**，故不作为判据。@`f0e9875c`(review_materials.py)
+
+---
+
+### F18 · 一个动作多套素材：命名规则与随机挑选
+`pet/assets.py` 的 `_split()` 把 `<状态>_<套名>_<序号>.png` 拆成 `(套名, 帧序)`：
+**最后一段永远是帧序**，倒数第二段非纯数字才算套名 —— 所以 `poke_01`（默认套第 1 帧）
+不会被误当成"套名 01"。`AssetBank` 多了 `self.sets[状态] = {套名: [帧]}` 与
+`set_names(state)`；`raw/count/scaled/frame` 各多一个可选 `set_name`，**不传时行为与以前
+完全一致**（取默认套），老调用点不用改。
+
+`PetWindow` 在**动作触发的那一刻**调 `_begin_action()` → `_pick_set()` 挑一套：
+- 随机池**排除上一次用过的那套**（记在 `self._sprite_set[sprite]`）→ 两套素材是完美轮换，
+  不会出现"点了没变"
+- 动作时长按**本次选中的那一套**算：`_oneshot_seconds()` 用 `bank.count(sprite, 选中套)`
+- 只有一套（或没分套）时 `_pick_set()` 返回 None，不假装随机
+
+**哪个状态由谁触发挑套，是这块最容易记混的地方：**
+
+| 状态 | 触发点 | 时机 |
+|---|---|---|
+| `poke` / `feed` | `poke()` / `feed()` 里显式调 `_begin_action()` | 点下去的那一刻 |
+| `drag` | `mouseMoveEvent` 里调 | 拎起来的那一刻 |
+| `walk` | `_advance()` 每帧调 `_track_state()`，比对状态 | **状态刚变成 walk 的那一帧** |
+| `idle` | 不挑，永远用默认套 | —— |
+
+`idle` 不参与：它要在状态里停好几秒，中途换套画面会跳一下。
+`walk` **参与**，但只在起步那一帧挑一次、**整段行走不换**（两套帧数 8 / 14 不同，
+中途换会接不上）。walk 是行为状态机自己溜达进去的，**没有任何外部事件可以挂钩**，
+所以只能靠在主循环里比状态 —— 判断标准是"换套的那一帧会不会被看见"，
+不是"是不是循环状态"。
+
+- 证据：`bank.set_names('poke') == ['', 'a', 'b']`、`feed == ['', 'a', 'b']`、
+  `walk == ['', 'a']`、`drag == ['']`；`_split(Path('poke_a_07.png'), 'poke') == ('a', 7)`、
+  `_split(Path('poke_07.png'), 'poke') == ('', 7)`
+- 证据：poke 3 套帧数 9/14/20、feed 3 套 22/18/16、walk 2 套 8/14；
+  `_oneshot_seconds(State.POKE)` 随选中套给出 0.72 / 1.12 / 1.60 s（÷ FPS 12.5）
+- 证据：连点 30 次（seed 20260921）→ 出现过 `['', 'a', 'b']`；12 次序列相邻两两不重复
+- 证据：反复起步 8 次（seed 20260922）→ 选到 `a - a - a - a -`（`-` 表示默认套），
+  相邻两次必不同；行走途中连跑 20 帧，选中的套不变
+- 配套：`pet/assets.py` 另导出 `set_files(root, state, set_name)`（默认套简写
+  `default_set_files(root, state)`），给预览/校验脚本按套取帧用 —— 脚本里裸
+  `glob("poke_*.png")` 会把多套拼成一条（见 F7 的踩坑记录）
+- ⚠️ 多套还带来一个方向问题：各套是**分开抠的图，原图朝向未必一致**，
+  所以 `facing.json` 要能按套声明（见 F24）。`walk_a` 就是这么一套。
+- @`16b87e8f`(assets.py) @`9ebf8f57`(window.py) @`af0a1184`(smoke_test.py)
+
+### F19 · 多套素材的验收工具（三个）
+
+**触发式的**（poke / feed）：`tools/verify_variants.py` —— 隔离存档后造真窗口，
+poke 9 次 / feed 6 次，每次推 6 帧再 `grab()` 抓**真正画出来的那一帧**，
+拼成 `reports/variants.png`（504×970），每格标注套名。
+- 证据：脚本输出「逗它玩（左键单击）: 9 次里用到的套 = ['a','b','default']；
+  喂一口: 6 次里用到的套 = ['a','b','default']」
+- 证据：`ls -la reports/variants.png` → 235271 B；跑完 `config.json` md5 不变
+- @`f3d7acd6`(verify_variants.py)
+
+**起步式的**（walk）：`tools/verify_walk_sets.py` —— walk 没法"连点"，
+**只能反复让它重新起步**：每次先 `_enter(IDLE)` + `_track_state()`（这一步不该挑套），
+再 `_enter(WALK)` + `_track_state()`（挑套发生在这里），推 4 帧后 `grab()`。
+三行拼图写 `reports/walk_sets.png`（1098×588）：① 现在的 idle 连续帧、
+② 六次起步各一帧（标出这次用的套）、③ 非默认套自己的连续帧。
+- 证据：脚本输出「walk 可选的套：['', 'a']」「六次起步选到：a default a default a default」
+- 证据：`ls -la reports/walk_sets.png` → 243058 B（2026-09-22 傍晚改朝向前后差 3 B，
+  因为图里那两帧真的跟着翻了一次 —— 这条也能当"朝向改动生效了"的旁证）
+- @`79681ced`(verify_walk_sets.py)
+
+**朝向的**（逐套）：`tools/verify_facing.py` —— 走路有几套就验几套，
+每套渲染"向右走 / 向左走"两帧并与该套的**原图 / 水平镜像**比像素，
+出 `reports/facing_fix.png`（2026-09-22 傍晚由 2×2 单套版扩成逐套版，109192 → 214808 B）。
+任一方向对不上就打印"反了"并返回退出码 1。**声明填得对不对它证明不了**（见 F6 / F24）。
+- 证据：脚本输出「套「默认套」声明朝左（跟随目录默认）=> 正确；
+  套「a」声明朝右（按套覆盖）=> 正确；结论：验收通过：2 套都「走哪边就朝哪边」」
+- @`a325e9a0`(verify_facing.py)
+
+### F20 · 两个游戏窗口共用 `game.common.GameWindow` 底座
+`class GameWindow(QWidget)` 定义在 `game/common.py`，`MiniGame` 与 `CatchGame` 都继承它。
+底座持有一局结束的信号与全部"两个游戏必须一样"的部分：
+
+- `closed = Signal(int)`（参数为本局得分）；`main.py` 靠它解除桌宠暂停
+- `TITLE` / `OVERLAY_TITLE` 两个类属性决定窗口标题与结算标题
+- 16ms 精确计时器（`_tick` 里 `dt = min(0.05, max(0, now-last))`；`start_clock()` 由子类
+  在场景建好后显式调，避免计时器在 `_reset_scene()` 之前滴答）
+- 结算浮层的 `_build_overlay` / `_center_overlay` / `_restart`、`resizeEvent` / `showEvent`
+  / `closeEvent`（关窗时 `_timer.stop()` + `closed.emit(self.score)`）、`keyReleaseEvent`
+- 模板方法 `_advance(dt)`：先 `_countdown`（回合规则，默认空）→ 再看 `over` 决定
+  `_settle`（停住）还是 `_step`（物理）→ 最后统一 `_decay`（衰减/粒子）+ `update()`
+- 子类**必填**钩子：`_step(dt)` 与 `_reset_scene(first)`（都是 `raise NotImplementedError`）
+
+- 证据：`"closed" in GameWindow.__dict__` → True；`"closed" in MiniGame.__dict__` →
+  False；`issubclass(MiniGame, GameWindow) and issubclass(CatchGame, GameWindow)` → True
+- 证据：`smoke_test.py` 的「离屏渲染」段新增 9 条断言全 PASS（见 F4）
+- 证据：`_settle` 的参数名必须与底座一致（都叫 `dt`）—— 子类改叫 `_dt` 会被 pyright 判为
+  `Method "_settle" overrides class "GameWindow" in an incompatible manner`（已实测遇到过）
+- 证据：重构后完整链复跑通过 —— 冒烟 134/0（截至 2026-09-22 夜已增至 159/0，见 F4）、预览 7 张产物、`verify_facing` 「走哪边就朝哪边」、
+  `verify_actions` 12 张连拍、`verify_variants` 三套都在用；两套内置风格都仍能各生成 27 张
+- @`cc6ed772`(common.py) @`db587c26`(minigame.py) @`c2d65504`(catcher.py) @`ea223241`(main.py)
+  @`4be2ba5b`(game/__init__.py)
+
+### F21 · 类型检查基线：pyright 全绿
+用 pyright（Pylance 的同一套引擎）扫 `main.py game pet tools`：
+**52 errors → 0 errors, 0 warnings, 0 informations**（2026-09-21 17:40）。
+- 证据：`node <...>/node_modules/pyright/index.js --pythonpath <venv python> main.py game pet tools`
+  → `0 errors, 0 warnings, 0 informations`
+- 复现入口：`tools/typecheck.py`（默认就查这四个范围；没装 pyright 时打印安装命令并返回 0）。
+  pyright 装在托管 node 目录：`~/.workbuddy/binaries/node/workspace`（v1.1.414），**没走 `npm i -g`**
+- 清掉的几类（都不改运行时行为）：
+  1. `Image.LANCZOS/NEAREST/BICUBIC/AFFINE` → `Image.Resampling.*` / `Image.Transform.AFFINE`
+     （19 处，Pillow ≥9.1 的现代写法，常量值相同）
+  2. PIL 桩把 `Image.load()` / `getdata()` / `getextrema()` 标得含糊（可能是 None /
+     DeferredError），导致取值、解包、迭代全被误报 → 在 `pet/icon.py`、
+     `tools/{prep_sticker,review_materials,verify_facing}.py` 里用 `Any` / `cast` 收口
+  3. `getbbox()` 可能返回 None（**全透明帧会真的 None**）：`tools/render_preview.py` 加了
+     fallback —— 真出问题时不崩，图里那一格直接是空的
+  4. `tools/prep_sticker.py` 的 `base` / `uy0` 只在 `if motion == "keep"` 里赋值，
+     取值在另一个同类 if 里 → 先给默认值（潜在 UnboundLocalError）
+  5. `tools/verify_facing.py` 的 `min(d, key=d.get)` → `key=lambda k: d[k]`；
+     `tools/review_materials.py` 的 `if not cnt` → 补 `or top is None or bot is None`
+- 证据：`tools/typecheck.py` 输出 `[类型检查] 通过：0 error`
+
+### F22 · 素材存放位置：四层结构（换素材前先看这条）
+`assets/` 与 `custom_pet/` 是**两套完全不同的东西**，这是最容易混的一处：
+
+| 位置 | 内容 | 谁会读它 |
+|---|---|---|
+| `custom_pet/` | 161 张 png + `facing.json`（现役成品） | **程序运行时唯一在读的** |
+| `assets/pet/` | 内置素材位，**当前为空（只有 README）** | 只在 `custom_pet/` 里没有 png 时才读 |
+| `assets/game/` | 小游戏素材（40 张） | 小游戏读（`%APPDATA%\DesktopPet\game\` 不存在时） |
+| `assets/raw/` | 原始素材仓库 | **不参与运行**，只给人挑素材用 |
+
+`assets/raw/` 内部（2026-09-22 傍晚实测；两个归档目录本日改过名，见 F26）：
+
+| 子目录 | 数量 | 是什么 |
+|---|---|---|
+| `_library/0921_1530_线条小狗GIF/` | 200 个 GIF | 选材总库（爱给网批量下载的那批） |
+| `_library/0921_1530_背景图/` | 2 张 png | 游戏背景原图 |
+| `_archive/` | 3 个 GIF | 加工完的原始输入留档（`0921_1228/` 已被误删）**原名 `_done/`** |
+| `_snapshots/` | 186 个文件（182 png） | 历史成品快照 + 原图已丢的那几套 **原名 `_recovered/`** |
+| `inbox/` | 1（只有 `.gitkeep`） | 投递口，`tools/intake.py` 从这里取 |
+
+优先级的**唯一实现**在 `pet/paths.py`：`resolve_asset_dir("pet")` 看 `user_asset_dir("pet")`
+（= `data_dir()/custom_pet`）里有没有匹配 `*.png` —— **有一个就整体接管**
+（不是合并；缺的状态才借 `idle` 兜底）。登记表是 `ASSET_KINDS`，**加一类素材只加一行**。
+`data_dir()` 在冻结后是 `%APPDATA%\DesktopPet`、开发时是项目根目录，
+所以源码树里的 `custom_pet/` 就是运行时那一个。
+- 证据：`ls -1 custom_pet/*.png | wc -l` → 161；`ls "$APPDATA/DesktopPet"` → 不存在
+- 证据：`grep -n "def resolve_asset_dir" -A 8 pet/paths.py` @`17a44b33`(paths.py)
+- 加工链：`_library` 挑 GIF → `tools/prep_sticker.py` 拆帧/抠底/缩到 128 → 写进 `custom_pet/`。
+  **换素材全程不用改代码**（只有换"状态"才动代码）。
+
+### F23 · 「坐板凳」那套素材的来源与原图状态
+`idle` 现在那 17 帧来自 `assets/raw/_snapshots/线条小狗晃脚脚2_idle/`
+（奶油色小狗坐木长凳晃腿、闭眼微笑、红项圈）。
+
+**它的原始 GIF 已经不存在了**：归档在 `_archive/0921_1228/`，随那次误删一起丢失；
+复查过 `Downloads/` `Desktop/` `Documents/` `Pictures/`，没有副本
+（`Downloads/线条小狗GIF/` 是个空目录）。
+- 证据：`find /c/Users/华硕/{Downloads,Desktop,Documents,Pictures} -iname "*线条小狗*"`
+  → 只剩 `线条小狗 (561)` / `可爱线条小狗喂一口` / `线条小狗 (160)逗他玩` 三个
+- 证据：`_snapshots/README.md` 原文表格「`线条小狗晃脚脚2_idle/` | 奶油色小狗坐板凳晃腿 | `idle` | 17」
+- **原图丢了 ≠ 不能用**：`custom_pet/` 里跑的所有素材本来就是 128px，
+  这份 128px 加工版与它们**同规格**，重摆一次不会更糊。
+- 重摆参数：`tools/rebuild_from_snapshot.py`，默认 `×1.26`。
+  那批帧当年为迁就木凳的包围盒被压在 `scale 0.678`，**狗本体只有约 75 高**
+  （其它状态的主体都在 100 上下）。1.26 是「不裁到木凳」的上限：
+  并集宽 100 × 1.26 = 126 ≤ 128，狗本体回到约 94，与 walk 的 100 齐平。
+- 证据：最大连通域量各状态**主体**高 —— idle 103 / walk 100 / drag 100 / poke 109 /
+  feed 109 / poke_b 98 / feed_a 99 / feed_b 99 / **坐木凳 90（其中约 20px 是凳子）**。
+  注意判大小的依据是"狗本体"而非"狗+道具"的并集，否则凳子会把狗挤小。
+- 证据：`python tools/rebuild_from_snapshot.py --dry-run`
+  → `[计划] idle ← 坐木凳 ×1.26 (100x91 → 126x115，贴入 (1, 7))`；脚本幂等，可反复跑
+
+### F24 · 按套声明朝向（一个动作多套素材时，方向未必一致）
+`facing.json` 除了 `base`，还认一个 **`sets`**（按素材**前缀**覆盖）：
+
+```json
+{ "base": "left", "sets": { "walk_a": "right" } }
+```
+
+查的时候统一走 `pet/facing.py` 的 `base_for(base, sets, state, set_name)`；
+窗口层每帧只做一次 dict 查表（缓存在 `self.face_sets`，**绘制循环不读盘**）。
+
+- 为什么 key 用**前缀**而不是裸套名：套名 `a` 在 `walk_a` / `poke_a` / `feed_a`
+  里是重名的，裸套名一定互相串台。`facing.prefix(state, set_name)` 负责拼。
+- 触发原因：`walk_a` 就是那套**原图朝右**的素材（前爪朝右举起、小尾巴甩在左下），
+  装进这个"整体朝左"的目录后，`base=left` 让它**永远被镜像反了 → 倒着走**。
+  它原来当 `idle` 用，站着不动时不容易察觉；2026-09-22 挪去当走路素材后暴露。
+- 反查证据（那一刻桌面显示的到底是原图还是镜像）：
+  `屏幕截图 2026-09-22 155557.png` 与 `walk_a` 14 帧的原图/镜像逐帧比像素 →
+  **原图最小差 159.52（walk_a_07）/ 镜像最小差 169.89（walk_a_00）** → 当时显示的是原图。
+- 改法：`tools/set_facing.py flip --set walk_a`；`<value> --set <前缀>`；
+  值改回与默认一致时**自动把那一条删掉**（不保留冗余声明）。
+- 右键菜单 `左右翻向` 会**连 `sets` 一起翻**（只翻 base 会把相对关系翻没）。
+- `facing.write(..., sets=None)` 默认**原样保留**文件里已有的 `sets`
+  （不然只想改总朝向，却把某套的声明顺手抹了）；传空 dict 才清空。
+- 验收：`tools/verify_facing.py` 改成**逐套**验（走路有几套就验几套），
+  出 `reports/facing_fix.png`，任一套对不上就退出码 1。
+- 证据：`tools/verify_facing.py` 输出
+  「套「默认套」声明朝左（跟随目录默认）=> 正确；套「a」声明朝右（按套覆盖）=> 正确；
+  结论：验收通过：2 套都「走哪边就朝哪边」」
+- 证据：`tools/set_facing.py` → 「默认朝向 朝左 / 按套 walk_a -> 朝右 /
+  [默认套] 向右走要镜像 / [walk_a] 向右走不镜像」
+- 证据：冒烟测试里含 10 条按套断言（见 F4）
+- **素材 PNG 一个字节都没动**；`custom_pet/facing.json` 是唯一被改的数据文件
+  （改前副本在 `assets/raw/_snapshots/pre_0922/facing.json`）。
+- @`0890187f`(facing.py) @`9ebf8f57`(window.py) @`16b87e8f`(assets.py)
+  @`a469a5e4`(set_facing.py) @`a325e9a0`(verify_facing.py) @`af0a1184`(smoke_test.py)
+- 甄别办法（下次找素材直接可用）：把候选帧与 `custom_pet/` 的帧都归一化到 96×96 比像素差，
+  最小的就是同一套。实测用户截图与 `idle_08.png` 差异 **58.17**，第三名（drag_12）74.47 ——
+  差一个档位就能分辨，不用肉眼猜。
+- @`95e3a98b`(rebuild_from_snapshot.py)
+
+### F25 · 「重力下坠」开关（2026-09-22 夜从"点了没用"修成真的管用）
+**症状**：右键菜单 / 托盘菜单里勾不勾「重力下坠」，宠物都照样往下掉。
+
+**根因**（一行）：`pet/window.py` 的重力判定写成了
+
+```python
+use_gravity = bool(self.cfg.gravity) or not self.body.on_ground   # ← 错
+```
+
+`or not on_ground` 的意思是"脚一离地就再补一次重力"。而下坠中的宠物**必然**脚不沾地
+（`physics.Motion.update` 里 `y < floor` 就置 `on_ground = False`），
+于是这个 `or` 在**唯一需要它的场景里恒为真**，把整个开关架空了。
+在地面上时两个分支都给 False，看不出区别 —— 所以这个 bug 从外部看就是"开关完全无效"。
+
+**改法**（1 处判定 + 3 处连带，都在 `pet/window.py`）：
+
+| 位置 | 改动 | 为什么必须连带 |
+|---|---|---|
+| `_advance` | `use_gravity=bool(self.cfg.gravity)` | 只认设置本身 |
+| `mouseReleaseEvent` | `brain.drag_end(gravity=bool(self.cfg.gravity))` | `FALL` 只认"落地"这一个出口，没重力就永远出不来，松手会卡在半空演下坠 |
+| `poke` | 起跳条件加 `and self.cfg.gravity` | 没重力就没有回落，`throw(0,-430)` 会让它一路飘到天花板 |
+| `set_gravity` | 关掉时除清 `vy` 外，若正处于 `FALL` 则 `brain.stop_falling()` | 正掉到一半被关掉重力时，就地冻住而不是继续演完 |
+
+`pet/behavior.py`：`drag_end(*, gravity=True)`（默认值保证老调用行为不变）+
+新增 `stop_falling()`（无条件回 `IDLE`）。
+
+- 语义定死：**不勾 = 不下坠**，拖到哪儿松手就悬在哪儿；单击不再往上蹦；
+  再勾回来接着往下掉。`on_ground` 由 `physics` 每帧照常维护，与开关无关。
+- 证据（冒烟 9 条，见 F4）：起点 y=83 →
+  勾选 1.0s 后 y=647（下坠 564px）、不勾 y 恒为 83（Δ=0）、
+  第 9 帧改不勾后停在 y=193（Δ=110px）。
+- 证据（真帧图）：`tools/verify_gravity.py` → `reports/gravity_switch.png`，
+  三排分别是勾选 / 不勾 / 中途改，每排贴 `grab()` 抓的真帧，纵轴是真实屏幕高度；
+  连跑两次 md5 一致（`6c7bbab7cfbe0e32f5d1f9b24509589a`，192761 B）。
+- 证据：`config.json` 跑前跑后 md5 一致（脚本用临时存档路径，且只 `hide()` 不 `close()`）。
+- ⚠️ 这是"布尔开关被 `or` 条件架空"的典型样本：**开关的判定里不能再掺入运行时状态**，
+  否则那个状态一旦与原条件相关（这里 `on_ground` 与"正在下坠"天然互锁），
+  开关就永远被短路。同类风险点：`auto_walk`（判定只看 `cfg.auto_walk`，干净）。
+- @`7351dc7c`(window.py) @`f9e2e895`(behavior.py) @`84631331`(smoke_test.py)
+  @`6093c6a7`(verify_gravity.py)
+
+### F26 · 删除自绘素材 + 抽出三个登记表 + 素材库改名（2026-09-22 傍晚）
+用户要求：**删掉"代码画"的那套素材**（保留全部 GIF 素材），并把代码结构与素材库结构
+整理成"易于加新功能、加新素材"。
+
+**一、删除的（自绘素材与生成器）**
+
+| 删除对象 | 说明 |
+|---|---|
+| `pet/assetgen.py` | 风格 classic：奶茶色小狗（22 帧几何生成） |
+| `pet/assetgen_line.py` | 风格 line：线条小狗（解析剪影 + 形态学描边） |
+| `pet/styles.py` | 风格注册表 + `load()` / `names()` |
+| `tools/gen_assets.py` | 生成入口（`--list` / `--style` / `--force`） |
+| `tools/make_fixtures.py` | 造假素材（回归验证 intake 用） |
+| `tools/fixtures/` | 上述假素材的产出（14 个文件） |
+| `assets/pet/*.png` | 21 张内置 PNG（保留 README.md） |
+| `.style_cache/` | `render_preview.py` 的两风格对比缓存 |
+| `reports/preview_styles.png` | 两套自绘风格的对比图（已无法再生成） |
+
+**没动的**：`custom_pet/` 161 张（F1 仍成立）、`assets/game/` 40 张、`assets/raw/` 全部
+（`_library` 200 GIF / `_snapshots` 186 / `_archive` 3）。
+- 证据：删除后 `ls assets/pet/` → 只有 README.md；`ls -1 custom_pet/*.png | wc -l` → 161
+- 证据：`find . -name "assetgen*" -o -name "gen_assets*" -o -name "styles.py"` → 空
+
+**二、抽出的三个"登记表"（单一来源）**
+
+| 单一来源 | 原来各抄一份的地方 | 覆盖的东西 |
+|---|---|---|
+| `pet/behavior.py` 的 `State`（+ `KEYS`） | `assets.STATES`、`prep_sticker.VALID_STATES`、`behavior.SPRITE`（已删） | 动作名 / 贴图前缀 |
+| `pet/paths.py` 的 `ASSET_KINDS` | `config.pet_asset_dir()` / `game_asset_dir()` / 两处手写 `data_dir()/"custom_pet"` | 素材类别与两套目录 |
+| `pet/menu.py` 的 `TOGGLES` | `window._build_menu` 与 `tray.update_menu` 各写一遍的三个开关 | 菜单开关项 |
+
+配套改动：`Config.style` 字段删除（自绘没了，风格概念不再存在）；
+`main.py` 的 `ensure_assets()` 改成 `check_pet_assets()`（**只提示，不生成**）；
+`tools/render_preview.py` 删 `make_style_compare()` 与 `.style_cache` 用法；
+`tools/smoke_test.py` 素材段改为临时目录现造纯色 PNG（见 F4）；
+`.vscode/tasks.json` 删 3 个调用 `gen_assets.py` 的任务。
+- 证据：`grep -rn "gen_assets\|assetgen\|pet.styles\|style_cache\|fixtures" --include=*.py .` → 无匹配
+- 证据：`python tools/typecheck.py` → `0 errors`；`python tools/smoke_test.py` → `通过 151 项，失败 0 项`
+- 证据：`python -c "import json;json.load(open('.vscode/tasks.json',encoding='utf-8'))"` → OK，18 个任务
+
+**三、素材库改名（用户确认后执行，只改名不删文件）**
+
+| 原名 | 新名 | 理由 |
+|---|---|---|
+| `assets/raw/_done/` | `assets/raw/_archive/` | "加工完的原始输入归档"，原名看不出含义 |
+| `assets/raw/_recovered/` | `assets/raw/_snapshots/` | "历史成品快照"，原名的"recovered"像是异常状态 |
+| `tools/rebuild_from_recovered.py` | `tools/rebuild_from_snapshot.py` | 跟着上面的名字走 |
+
+同步改了 11 个文件的引用（`.gitignore` / `FACTS.md` / `README.md` / `.vscode/tasks.json` /
+`custom_pet/README.md` / `reports/README.md` / `tools/intake.py` / 该脚本自身 /
+`assets/raw/README.md` / `_snapshots/README.md` / `_snapshots/pre_1550/README.md`）。
+`intake.py` 的常量 `DONE` 一并改名 `ARCHIVE`（代码名与盘上目录名对齐）。
+- 证据：`grep -rn "_done\|_recovered\|rebuild_from_recovered" --include=*.py --include=*.md .` → 无匹配
+- 证据：`ls assets/raw/` → `README.md _archive _library _snapshots inbox`
+
+**四、给"加东西"留的入口**（README「怎么扩展」一节）
+加动作 = `State` 加成员 + 挂交互；加素材套 = 按命名丢文件（不改代码）；
+加开关 = `Config` 字段 + setter + `TOGGLES` 一行；加素材类别 = `ASSET_KINDS` 一行；
+加游戏 = 继承 `GameWindow` + `GAMES` 一项。
+
+**五、版本号与 `CHANGELOG.md`（本项新增）**
+新增 `CHANGELOG.md`：从 v0.1.0（起步）到 v1.0.0（本次架构定型）逐条记录，
+每条写"为什么改 / 改了什么 / 怎么验证的"，另附「开发过程回顾」。
+`pet/__init__.py` 的 `__version__` 由 `0.1.0` 升到 **`1.0.0`**。
+两处版本号由冒烟测试的「版本号」段盯着（见 F4 末条）：
+读 `CHANGELOG.md` 第一条 `## vX.Y.Z` 与 `__version__` 比对，不一致就 FAIL。
+新增 `assets/README.md`（素材库总索引）。
+- 证据：`grep -m1 "^## v" CHANGELOG.md` → `## v1.0.0 — 2026-09-22 晚 · 架构定型`
+- 证据：`grep -n "__version__" pet/__init__.py` → `1.0.0`
+- 证据：`ls *.md assets/*.md` → `CHANGELOG.md FACTS.md README.md` + `assets/README.md`
+
+- 时间线（本日，从早到晚）：idle 换"坐板凳" → walk 两套轮播 → walk_a 按套朝向 →
+  重力开关修真 → **本轮：删自绘素材 + 三登记表 + 素材库改名 + 加 CHANGELOG**。
+
+### F27 · v2.0.0 五大玩法：甩出去 / 养成状态 / 金币小卖部 / 接狗狗道具 / 番茄钟（2026-09-23 午）
+用户要求：**在不动原有项目结构的前提下，把五个玩法加进去**（其中前四个是"代码写好了但从没接线"的半成品，
+第五个是全新），并把这次更新记进版本更新文件。
+
+**一、五个玩法各自接的是哪根线**
+
+| 玩法 | 原来是"半成品"还是"没有" | 本轮接了什么 |
+|---|---|---|
+| 甩出去 | `physics.Motion.throw()` / `edge_bounce` / `restitution` **从没被调用** | `VelocitySampler` + `clamp_fling` + `window` 的 `_start_fling` / `_end_fling` |
+| 养成状态 | `Config.feed_count` / `play_count` 是**死计数器**（存了没人读） | 新增 `pet/vitals.py`：饱食/心情/精力 + 离线衰减 + 阈值；新增 `State.SLEEP` |
+| 金币小卖部 | **没有** | `game/common.py` 的 `COIN_PER_SCORE=10` / `coins_for()`；`pet/menu.py` 的 `SHOP` |
+| 接狗狗道具 | `CatchGame.heal()` 写好了没人调；`Faller` 水平速度恒为 0 | 新增 `bone` 落体（给分+回血）；`_give_drift()` 给落体加风、撞墙反弹 |
+| 番茄钟 | **没有** | 新增 `pet/pomodoro.py` + 右键/托盘子菜单 + `pomodoro_done` 信号 → 托盘气泡 |
+
+**二、新增/改动的模块**
+
+| 文件 | 性质 | 要点 |
+|---|---|---|
+| `pet/vitals.py` | ★新增 | 纯逻辑无 Qt。醒着每分钟 `-0.21/-0.16/-0.28`（饱食/心情/精力）；**睡着时精力 `+6.0`、心情 `+0.18` 回升，饱食 `-0.20` 降得慢**；离线每小时 `6.0`、下限 `30.0`、上限 `12h`；阈值 `HUNGRY_AT/SAD_AT=30`、`TIRED_AT=25`、`RESTED_AT=82` |
+| `pet/pomodoro.py` | ★新增 | 纯逻辑无 Qt。`tick(dt)` **只在到点那一次**返回 `True`；`progress` / `label` / `total_minutes` |
+| `pet/physics.py` | 改 | `VelocitySampler`（丢超过 `FLING_WINDOW=0.14s` 的旧点）、`clamp_fling`（`FLING_MIN=130` / `FLING_MAX=2200`）、`FLING_RESTITUTION=0.18` |
+| `pet/behavior.py` | 改 | 新增 `State.SLEEP` + `FPS["sleep"]=4.0`；`Brain.update` 新增 `rested` 参数（**滞回出口**）；`WAKE_HOLD=25.0`；`start_seek`/`update_seek`（`SEEK_ARRIVE_PX=10`） |
+| `pet/config.py` | 改 | 新增 `satiety/mood/energy`（初值 78）、`coins=0`、`last_seen`；`now_stamp()` / `hours_since()` |
+| `pet/menu.py` | 改 | `SHOP`（肉干12/玩具球18/豪华大餐30）、`POMODORO_CHOICES=(25,50)`、`add_vitals` / `add_shop` / `add_pomodoro` |
+| `pet/window.py` | 改 | `_tick_vitals`、`_steer_if_hungry`、`start/stop/_tick_pomodoro`、`_ring`、`buy()`、`_play_gift` |
+| `pet/tray.py` | 改 | 托盘菜单也带金币/养成项 + 小卖部/番茄钟子菜单 |
+| `game/common.py` | 改 | `COIN_PER_SCORE` / `coins_for()` / `GameWindow._award_coins()`（**只在结算时发钱**）|
+| `game/minigame.py` `game/catcher.py` | 改 | `_finish()` 调 `_award_coins()`；catcher 另加骨头与漂移 |
+
+**三、踩到并修掉的真 bug：睡眠抖动（滞回缺失）**
+
+第一版 `energy < 25` 睡、`energy > 25` 醒 —— **同一个阈值进出**，睡 1 帧醒 1 帧。
+`verify_vitals.py` 跑 36 小时**抖出 1052 次睡眠**（曲线上是一团噪声）。
+根因：`RESTED_AT=82` 这个常量**定义了但没人用**。
+改法：`Brain.update()` 加 `rested` 参数，`SLEEP` 出口从"不累了"改成"睡饱了"，
+`window.py` 传 `self.vitals.rested`。修完 → **36 小时 10~11 觉、每觉约 10 分钟**。
+- 证据：`python tools/verify_vitals.py` → 「完全不管：…自主睡了 10 觉，共 1.6 小时」/
+  「定期照顾：…自主睡了 11 觉，共 1.8 小时」
+- 证据（实测曲线）：完全不管 → 饱食最低 0（第 4 小时开始饿）、心情最低 0（第 5 小时开始蔫）、
+  精力最低 25（第 17 小时开始困）；定期照顾 → 饱食最低 40、心情最低 49、精力最低 21（**都没饿过蔫过**）
+
+**四、`sleep` 素材的来源（反查确认，非推测）**
+
+从素材库 198 个 GIF 里挑出睡觉那一套，落 `custom_pet/sleep_00..21.png`（**22 帧**）。
+来源用**像素反查**定死：拿现役帧当模板逐帧比对全部 198 个 GIF，
+`xian_tiao_xiao_5191_线条小狗C (13).gif`（250×250 / **22 帧**、**黑底**）平均绝对差 **7.17**，
+第二名 **46.8** —— 且帧数正好也是 22，无歧义。
+缩放比是**自动算**的 **0.7436**（趴卧姿势并集 156×92，宽度成限制维度），内容是 **112×62**。
+复现命令与残余差异见 `custom_pet/README.md`。
+- **朝向无需单独声明**：放大对图（`reports/materials/sleep_facing_check.png`）确认
+  原图**脸在左**，与 `custom_pet/facing.json` 的 `base="left"` 一致 ——
+  所以 `sets` 里**不用**加 `sleep`（F24 那套"按套覆盖"这次不触发）。
+- ⚠️ 源 GIF 是爱给网**预览图**，带浅色斜排水印（与 F13b 同一批素材的性质）。
+  成品 112×62、实际显示约 96px 宽，水印在正常观看距离下不可见；放大看才有。
+- 证据：`ls custom_pet/*.png | wc -l` → 183（v1.0.0 时 161，+22）
+- 证据：`ls custom_pet/sleep_*.png | wc -l` → 22
+- 证据：`ls reports/materials/sleep_facing_check.png` → 存在（放大单帧 + 水平镜像对照）
+
+**五、版本号与文档**
+
+`pet/__init__.py` 的 `__version__`：`1.0.0` → **`2.0.0`**（大改动：三个新模块 + 行为可感）。
+`installer.iss` 的 `#define AppVer` 同步到 `2.0.0`。
+`CHANGELOG.md` 新增 v2.0.0 大条目（本节即其事实底稿）；`README.md`「怎么玩」补五大玩法、
+「目录结构」补新模块、「测试」补 3 个验收脚本、「怎么扩展」补加商品/加番茄钟档/调养成手感；
+`custom_pet/README.md` 补 `sleep` 来源与复现；本 FACTS 新增 F27 / F28 与 V12。
+- 证据：`grep -m1 "^## v" CHANGELOG.md` → `## v2.0.0 — 2026-09-23 午 · 五大玩法…`
+- 证据：`grep -n "__version__" pet/__init__.py` → `2.0.0`
+- 证据：`grep -n "AppVer" installer.iss` → `#define AppVer "2.0.0"`
+- 证据：`python tools/typecheck.py` → `0 errors, 0 warnings, 0 informations`
+- 证据：`python tools/smoke_test.py` → `通过 234 项，失败 0 项 / 全部通过`
+
+### F28 · 甩出去（拖拽投掷）的参数与实测轨迹（2026-09-23）
+**判定只看松手瞬间的手速，不看拖动距离**：`VelocitySampler` 按时间戳估速，
+松手时 `clamp_fling` 把速度夹进 `[130, 2200]`；低于下限当"轻放"（不进 FALL 带速），
+高于上限截断。关掉「重力下坠」开关时**一律不甩**（开关优先级高于手速）。
+
+实测（`tools/verify_fling.py`，`QMouseEvent` 合成的真实鼠标序列，800px 宽离屏屏）：
+
+| 松手方式 | 估到的松手速度 | 真飞出去？ | 撞墙 | 落地耗时 |
+|---|---|---|---|---|
+| 轻轻放 | 低于 `FLING_MIN` | ✗ | 0 | —— |
+| 正常一甩（往左） | ≈ `-640 / -160` | ✓ | 0 | 1.02s |
+| 使劲甩（往右） | ≈ `+2134 / -536` | ✓ | **1**（撞右墙弹回） | 1.35s |
+| 使劲甩 + 关掉重力 | `0 / 0` | ✗ | 0 | 未落地（悬停） |
+
+- ⚠️ **速度值每跑一次会小幅浮动**（手速靠真实时钟采样），
+  所以 `reports/fling_throw.png` **不是逐字节可复现的产物**，只能看趋势。
+- 证据：`ls -la reports/fling_throw.png` → 632×1054
+- 踩坑记录：验收脚本第一版只调了 `pet.body.teleport()`、没调 `pet.move()`，
+  于是松手时 `_sync_from_window()` 把 body 拉回**窗口的旧位置**，轨迹全废（0.08s 就落地）。
+  加 `_place()` 同时移动 body 与窗口后才真实。
+
+## 二、推断区（每条附证伪命令；给不出证伪方法的推断不许留）
+
+### I1 · 桌宠实例在跑时会周期性改写 `config.json`
+推断依据：观察到的变动**全部是"宠物自己会改的字段"**——`pos_x`（走动位置）、
+`feed_count` / `play_count`（投喂与互动次数），而工具用的是默认 `Config()`，
+会写的是 `scale`/`style`/`best_*` 这类。2026-09-21 16:10~16:20 期间在跑实例存在时
+反复观察到 `pos_x` 每次采样都不同（1305→1304）、`play_count` 28→30。
+- 反证（工具不写）：F16 的只读锁实验 —— 锁住后两个工具照跑不报错，锁前/锁后只差 `pos_x` 1。
+- 证伪/确认命令：`md5sum <config.json>` 连测两次（间隔数秒）；同时 `tasklist | grep -i python`
+  对比进程有无。若进程存在而 md5 稳定不变，则本推断不成立。
+
+### I2 · 两个互动动作的观感差异现在主要来自"帧数差"，不是帧率
+推断依据：`_oneshot_seconds = max(1, 帧数) ÷ FPS`。本轮 poke 只剩 **9** 帧 / 12.5fps ≈ **0.72s**，
+feed **22** 帧 / 10.0fps = **2.20s** —— 两者时长差了 3 倍，动作自然一个"弹一下"、一个"吃两口"。
+**这条是算术结论，不是实测观感。**
+- 证伪命令：把 `behavior.FPS[State.POKE]` 改成 2.0（时长变 ~4.5s）后重跑 `smoke_test.py`，
+  若「逗它玩时长」断言仍与 feed 拉开 3 倍以上、且用户看不出差别，则本推断不成立。
+
+### I3 · 接狗狗的难度曲线（`RAMP_TIME=75s` 爬满）对手感是合适的
+推断依据：75 秒时出怪间隔收到 0.45s、炸弹率 0.44，一屏同时最多约 3 个落体；
+再快（>0.5/秒）会出现"来不及移动就被判漏接"。**这条纯粹是设计判断，没有实测数据支撑。**
+- 证伪命令：让用户连玩 5 局并记录每局 gameover 的存活时长。若 5 局里有 3 局以上
+  **活不过 60 秒**，说明难度爬得太快，应把 `RAMP_TIME` 调大或把 `SPAWN_MIN` 调大；
+  若 5 局都**超过 3 分钟**，说明太松，反过来调。
+
+### I4 · `drag` 素材里那只小白狗不会被当成"换了一只宠物"
+推断依据：`drag_*.png` 里除黄狗外还有一只小白狗（黄狗在甩开它），是全集里最接近
+"挣扎/被拎"的素材；但它确实是**画面里出现了第二只狗**。判断"违和程度"没有客观方法。
+- 证伪命令：问用户"把桌宠拎起来的时候，看到旁边那只白狗会不会觉得奇怪"。
+  若回答"会" → 换成 `xian_tiao_xiao_5132_线条小狗C (8).gif`（狗吊在单杠上，
+  但带杠铃道具），或从素材库外另找。
+
+---
+
+## 三、已作废结论（禁止再引用）
+
+### V1 · ~~`State.PLAY` / `jump_*` 贴图~~（2026-09-21 下午作废）
+旧文档与旧记忆中的「`PLAY` 状态复用 jump 的 20 帧」「custom_pet 有 jump 20 帧」**已作废**：
+`PLAY` 已删除，`jump_*` 已从 custom_pet 移除，白狗素材退役。
+想恢复白狗：`python tools/intake.py --map 小狗1=poke --apply`（需先把原 GIF 拷回 `assets/raw/inbox/`）。
+
+### V2 · ~~F8 的旧指纹表 / 「小游戏只有一个·69 项测试」~~（2026-09-21 傍晚作废）
+2026-09-21 下午那版 FACTS 里的源文件指纹（`589fa96a`/`add4e96b`/…）**只对当时的文件有效**，
+本轮改了 `game/catcher.py`、`game/common.py`、`game/minigame.py`、`pet/facing.py`、
+`tools/prep_sticker.py`、`tools/intake.py`、`tools/render_preview.py`、`tools/smoke_test.py`
+并新增 `tools/prep_bg.py`，所以指纹已换成 F8 里那一组。**禁止再用旧指纹做"文件没被改过"的判断。**
+同理以下旧记述一并作废：
+- 「小游戏只有一个（弹跳得分）」→ 现有两个，见 F9。
+- 「冒烟测试 69 项 / 110 项 / 113 项 / 123 项 / 125 项 / 134 项 / 150 项」→ 曾为 **159 项**，
+  当日傍晚再改为 **151 项**，见 F4 / V11。
+- 「`pet.assets.STATES` 是唯一的贴图状态表」→ 游戏素材走 `catcher_/puppy*_/bomb_` 前缀，
+  与它无关，见 F13/F15。
+
+### V3 · ~~「预览脚本不会动用户存档」~~（2026-09-21 傍晚作废）
+旧结论认为 `render_preview.py` 是只读的。**错**：它截小游戏结算图时会走到
+`MiniGame._finish()` → `cfg.save()`，把临时默认 `Config` 写进真实 `config.json`。
+现已加 `isolate_config()` 修掉，但**当时之前如果跑过预览，用户的存档就已经被覆写过**。
+凡以后看到"位置突然回到 -1 / 投喂次数归零 / 最高分变小"，先怀疑这个。
+证据与修法见 F16 与 `reports/README.md` 坑位第 9 条。
+
+### V4 · ~~F13「游戏素材目录当前为空」/ I4「占位形象不会被误当成成品美术」~~（2026-09-21 16:20 作废）
+上一条 F13 说 `assets/game/*.png` 数量 = 0、接狗狗全走占位形象 —— **已不成立**：
+本轮素材已入库（见 F13）。连带的 I4（"担心用户以为已经做好了"）也一并作废：
+用户已明确知道要换素材，并且已经换完了。
+
+### V5 · ~~custom_pet 帧数「idle 14 / walk 8 / drag 23 / poke 9 / feed 22」之外的旧记录~~
+（2026-09-21 稍早的中间态，仅作历史）
+本轮中途曾出现过 idle 14 / walk 8 / drag 23 / **poke 24** / feed 20 等中间状态
+（poke 用的还是上一批素材）。**当前有效值只有 F1 那一行。**
+
+### V6 · ~~「验收产物写在项目根目录」~~（2026-09-21 17:00 作废）
+`render_preview.py` 与 `verify_desktop.py` 以前把图写在项目根目录，
+`reports/README.md` 又按 `reports/` 列清单，导致跑完任务还得手工搬一遍。
+现已改为**直接写 `reports/`**，项目根目录不再出现任何 png/gif。
+任何"去项目根目录找 `preview_sheet.png`"的旧说法一律作废，见 F7。@`28fcfecd` `6dec33b3`
+
+### V7 · ~~F13「`catcher_*` 14 张」~~（2026-09-21 17:00 作废）
+旧 F13 记 `catcher_*` = 14、`len(g.sprites['catcher'])==14`。那是因为当时用的是另一套
+catcher 素材；换成 `#5197`「张臂」那套（源 GIF 本身就 8 帧，`--keep 10` 截不到它）之后，
+**实际是 8 张**。禁止再引用 14。@`c2d65504`
+
+### V8 · ~~F1「custom_pet 76 张，poke 9 / feed 22 各一套」+ F4「113 项」~~（2026-09-21 傍晚作废）
+poke 与 feed 现在**各 3 套**（见 F18）。
+（同一条里"冒烟测试 123 项"作废 → 曾为 134 项、150 项、159 项，现 **151 项**，见 F4 / V11。）旧值只作历史；
+`custom_pet/` 总数也已成 161（见 V9）。
+
+### V9 · ~~F1「144 张 / idle 14」、F4「134 项」、F5「idle 来自 #6024」、F7「动图 122 帧 2179184 B」~~
+（**2026-09-22 作废**）
+2026-09-22 把待机换成「坐木凳晃腿」（17 帧，来源见 F23）、原 idle 那套转去当 `walk_a`，
+并让 walk 参与两套轮播（见 F18），于是：
+
+| 旧值 | 现值 | 依据 |
+|---|---|---|
+| `custom_pet/` 144 张 | **161 张** | F1 |
+| `idle` 14 帧（站姿挥手） | **17 帧**（坐木凳） | F1 / F23 |
+| `walk` 只有 1 套 8 帧 | **2 套：8 + 14 帧** | F1 / F18 |
+| 冒烟 134 项 | **159 项**（同日晚些改为 151 项，见 V11） | F4 / V11 |
+| 动图 122 帧 / 2179184 B | **128 帧 / 2494829 B** | F7 |
+| `facing.json` 只有 `base` | 加了按套覆盖 `sets` | F6 / F24 |
+| 读素材的命令模板（无 `walk_a`） | 已换成含 `walk_a` 的版本 | F1 证据行 |
+| `pet/window.py` @`61948a82` | @`9ebf8f57` → @`7351dc7c` | F8 |
+| `tools/smoke_test.py` @`7424b17d` | @`af0a1184` → @`84631331` | F8 |
+
+> 另注意：F5 里「idle 用的是 `xian_tiao_xiao_6024_线条小狗.gif`」**并没有错、只是容易误读** ——
+> 那套素材还在，只是状态名从 `idle` 换成了 `walk_a`。
+
+### V10 · ~~F6「`facing.json` 只有 `base` 一个键，整个目录一套朝向」~~（2026-09-22 傍晚作废）
+加了 `sets` 按套覆盖之后，`base` 只是**默认值**（见 F24）。
+直接后果：`walk_a` 那套原图朝右的素材此前**一直在倒着走**（`base=left` 让它永远被镜像反），
+这也是用户报"走路方向和面朝方向反了"的真正原因 —— **不是绘制代码的 bug**，
+是声明粒度不够。查"某套对不对"只能看图，别指望 `verify_facing.py` 的数字
+（它拿声明反推头朝哪边，天然自洽）。
+
+### V11 · ~~F8 的旧指纹表 / F4「159 项」/ F22 的「`pet/config.py` 是优先级唯一实现」/ 「`_done`·`_recovered` 为目录名」~~（2026-09-22 傍晚作废）
+删除自绘素材 + 抽出三个登记表 + 素材库改名之后，下列旧结论一律作废（新值见 F8 / F4 / F22 / F26）：
+
+| 旧值 | 现值 | 依据 |
+|---|---|---|
+| `assets/pet/` 有 21 张 assetgen 生成的 PNG | **空，只有 README.md** | F26 |
+| `pet/assetgen.py` / `pet/assetgen_line.py` / `pet/styles.py` 有 md5 | **文件已删除** | F26 |
+| `tools/gen_assets.py` / `tools/make_fixtures.py` / `tools/fixtures/` 存在 | **已删除** | F26 |
+| 冒烟 **159 项** | **151 项** | F4 |
+| `preview_styles.png` 是 `reports/` 的产物之一 | **已删除，不再生成** | F26 |
+| 素材优先级唯一实现在 `pet/config.py` | 移到 **`pet/paths.py`**（`ASSET_KINDS` 登记表） | F22 / F26 |
+| 状态名在 `behavior.SPRITE` + `assets.STATES` + `prep_sticker.VALID_STATES` 各一份 | **只在 `behavior.State`**，其余派生 | F3 / F26 |
+| 归档目录叫 `_done/` / `_recovered/` | **`_archive/` / `_snapshots/`** | F26 |
+| `tools/rebuild_from_recovered.py` | **`tools/rebuild_from_snapshot.py`** | F26 |
+| `Config` 有 `style` 字段、`main.py` 有 `ensure_assets()` | 字段删除；改为 `check_pet_assets()`（只提示不生成） | F26 |
+| `.vscode/tasks.json` 里有 3 个 `gen_assets.py` 任务 | 已删，共 18 个任务 | F26 |
+
+> **另外**：F1 / F3 / F5 / F6 / F7 / F9…等条目末尾那些**写在 2026-09-22 傍晚之前的
+> `@版本` 代码**（如 `@16b87e8f`(assets.py)、`@589fa96a`(behavior.py)、`@a02ab733`(config.py)）
+> 已随本轮改动失效 —— 一律以 **F8 的新指纹表**为准，引用前重新核对。
+
+### V12 · ~~F8 的旧指纹表 / F4「151 项」/ F1「custom_pet 161 张」/ F9·F10「接狗狗只有两种落体」/ 「版本 v1.0.0」~~（2026-09-23 午作废）
+v2.0.0 五大玩法（见 F27）落地后，下列旧结论一律作废（新值见 F8 / F4 / F1 / F27）：
+
+| 旧值 | 现值 | 依据 |
+|---|---|---|
+| `pet/__init__.py` 的 `__version__` = `1.0.0` | **`2.0.0`**（`installer.iss` 的 `AppVer` 同步） | F27 |
+| `CHANGELOG.md` 首条 = `## v1.0.0` | **`## v2.0.0 — 2026-09-23 午 · 五大玩法…`** | F27 |
+| 冒烟 **151 项** | **234 项**（+5 段共 83 条） | F4 |
+| `custom_pet/` **161 张** | **183 张**（+`sleep_*` 22 帧） | F1 / F27 |
+| `State` 只有 IDLE/WALK/DRAG/FALL/POKE/FEED（6 个） | **多一个 `SLEEP`**（7 个） | F3 / F27 |
+| `Config.feed_count` / `play_count` 是"死计数器"（存了没人读） | 仍是计数，但**新增** `satiety/mood/energy/coins/last_seen` 才是玩法状态 | F27 |
+| `physics.Motion.throw()` / `edge_bounce` / `restitution` "写了没接线" | **已接线**（`VelocitySampler` + `clamp_fling` + `window._start_fling`） | F28 |
+| 接狗狗只有 `puppy` / `bomb` 两种落体、`Faller` 水平速度恒为 0 | **多一种 `bone`**；带风落体有水平速度且**撞墙反弹** | F27 |
+| `CatchGame.heal()` "写好了没人调" | **骨头会调它**（有伤时回 1 滴） | F27 |
+| 「菜单里只有 1 个子菜单（一起玩游戏）」 | **3 个**（小卖部 / 番茄钟 / 一起玩游戏） | F4 / F27 |
+| `reports/` 只有 22 个产物（改朝向那批） | **+3**：`vitals_curve.png` / `fling_throw.png` / `catch_items.png` | F7 / F27 |
+| `pet/config.py` 只管"用户选了什么"（v1.0.0 的说法） | 仍然只管配置，但**多了养成与金币字段**（含时间戳换算） | F27 |
+| `pet/physics.py`、`pet/anim.py` 不在 F8 指纹表里 | **已补登记**（v1.0.0 那次漏了） | F8 |
+
+> **旧 `@版本` 提醒**：F1…F26 条目里写在 2026-09-23 之前的 `@` 代码一律失效，
+> 以 **F8 的新指纹表**为准。特别是 F4 末尾那串 `@84631331` 系列，已换成 F4 末尾的新串。
+

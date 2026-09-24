@@ -1,0 +1,71 @@
+{
+  // ================== Python 解释器 ==================
+  // 指向已装好 PySide6 + Pillow 的托管 venv，打开工作区即可直接运行/调试。
+  // 想换成自己的虚拟环境：在项目根目录执行
+  //     python -m venv .venv
+  //     .venv\\Scripts\\pip install -r requirements.txt
+  // 然后用 Ctrl+Shift+P -> "Python: Select Interpreter" 选中 .venv 即可
+  // （这一行不会被自动改写，手动改也行）。
+  "python.defaultInterpreterPath": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+
+  // 让「Python: Select Interpreter」能列出这个托管 venv（它在 .workbuddy 下，默认扫不到）。
+  // 选一次之后 Pylance 的补全与类型检查才会对齐。
+  // 注意 defaultInterpreterPath 只是"从未选择过解释器时的默认值"——
+  // 一旦你在任何项目里手动选过解释器，那个选择会覆盖它（本机当前就选成了
+  // uv 的垫片 .local\bin\python3.12.exe，那个环境没有 PySide6，所以 F5 必崩）。
+  "python.venvPath": "C:/Users/华硕/.workbuddy/binaries/python/envs",
+
+  // 终端里自动激活虚拟环境；若你的 shell 对中文路径有兼容问题，把它关掉即可
+  "python.terminal.activateEnvironment": true,
+  "python.terminal.activateEnvInCurrentTerminal": true,
+
+  // ================== 分析与检查 ==================
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.extraPaths": ["${workspaceFolder}"],
+  "python.analysis.diagnosticSeverityOverrides": {
+    // Qt 的信号槽与延迟导入会让这些规则大量误报，压掉噪音
+    "reportMissingImports": "warning",
+    "reportUnusedImport": "none"
+  },
+
+  // ================== 测试 ==================
+  // 本项目用的是自带的无界面冒烟测试，不是 pytest：
+  //     python tools/smoke_test.py
+  // 所以这里关掉测试发现，避免 VS Code 去扫一个不存在的测试目录。
+  "python.testing.pytestEnabled": false,
+  "python.testing.unittestEnabled": false,
+
+  // ================== 文件与编辑器 ==================
+  "files.encoding": "utf8",
+  "files.autoGuessEncoding": true,
+  "files.eol": "\r\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+
+  // 资源与存档属于产物，不进搜索/大纲
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.pytest_cache": true
+  },
+  "search.exclude": {
+    "**/__pycache__": true,
+    "assets/pet": true,
+    "assets/game": true,
+    "assets/raw": true,
+    "custom_pet": true,
+    "reports": true
+  },
+
+  "editor.rulers": [88],
+  "editor.tabSize": 4,
+  "editor.detectIndentation": false,
+  "[python]": {
+    "editor.formatOnSave": false,
+    "editor.codeActionsOnSave": {}
+  },
+  "[markdown]": {
+    "files.trimTrailingWhitespace": false
+  }
+}

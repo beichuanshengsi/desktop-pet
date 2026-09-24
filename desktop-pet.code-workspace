@@ -1,0 +1,27 @@
+{
+  "folders": [
+    {
+      "name": "🐾 桌宠工程",
+      "path": "."
+    },
+    {
+      "name": "📄 需求与报告",
+      "path": "docs"
+    }
+  ],
+  "settings": {
+    // 工作区级兜底：文件夹级 .vscode/settings.json 已经写好主要配置，
+    // 这里只放「换机器 / 换环境时最可能需要改」的一条。
+    "python.defaultInterpreterPath": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+    "window.title": "桌宠 · ${activeEditorShort}${separator}${rootName}"
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-python.python",
+      "ms-python.debugpy",
+      "ms-python.vscode-pylance",
+      "charliermarsh.ruff",
+      "yzhang.markdown-all-in-one"
+    ]
+  }
+}

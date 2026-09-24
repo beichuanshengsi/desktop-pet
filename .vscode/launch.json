@@ -1,0 +1,99 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // 正常启动桌宠。因为是常驻程序，不会自己退出，
+      // 停止调试时用 右键菜单/托盘 -> 退出，或直接点 VS Code 的停止按钮。
+      "name": "启动桌宠（main.py）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "justMyCode": false,
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    },
+    {
+      // 带控制台窗口启动。桌宠本体不弹黑框，
+      // 想看 print 输出或异常堆栈时用这个。
+      "name": "启动桌宠（显示控制台输出）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "externalTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "justMyCode": false,
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    },
+    {
+      // 37 项断言的无界面自检：状态机、物理、存档、小游戏计分。
+      // 改完任何逻辑先跑这个，比手动开窗口点一遍快得多。
+      "name": "无界面冒烟测试（推荐常跑）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/smoke_test.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "justMyCode": true,
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    },
+    {
+      // 在真实桌面上跑 2 秒并截屏，验证透明/置顶是否真的生效。
+      // 离屏渲染验证不了透明通道，这个是最硬的证据。
+      "name": "真实桌面透明验证（截图）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/verify_desktop.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "justMyCode": false,
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    },
+    {
+      // 重新生成动作帧对照表（preview_sheet.png）+ 游戏/桌宠渲染图
+      "name": "重新生成预览图",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/render_preview.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "justMyCode": true,
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    },
+    {
+      // 调试任意当前打开的脚本（比如 tools/prep_sticker.py 处理你的表情包）
+      "name": "调试当前文件",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe",
+      "justMyCode": true,
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    }
+  ]
+}

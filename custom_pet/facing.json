@@ -1,0 +1,7 @@
+{
+  "base": "left",
+  "sets": {
+    "walk_a": "right"
+  },
+  "note": "线条小狗素材：脸在左、后腿在右，向右走时要镜像。walk_a 那套（原 idle 站姿挥手）原图方向与其余素材相反，按套单独声明。sets 的 key 是素材前缀，跟 walk_a_00.png 对得上"
+}
