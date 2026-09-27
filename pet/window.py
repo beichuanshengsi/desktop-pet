@@ -23,6 +23,14 @@
 这四样彼此都不认识：Brain 不认识坐标，Motion 不认识行为，Vitals 不认识窗口，
 Pomodoro 不认识 Qt。**唯一的连接点就是这里**。所以这一层只做"喂事实、读结果"，
 不往里塞业务判定 —— 一旦判定散进去，那几样就都没法单独测了。
+
+背包（``bag.Bag``）也挂在这里，但它的角色不一样：它不是"每帧推一把"的东西，
+而是**用户操作的账本**。`buy()` 扣钱入库、`use_item()` 出库生效 ——
+这两个动作是改数值的唯一入口，和 Vitals 一样属于"数据"，不属于界面。
+
+**"要跟用户说句话"这件事也必须从这里出去**：窗口拿不到托盘，
+所以它只 ``notify.emit()``，由 ``main.py`` 决定是用气泡还是别的什么。
+跟 ``pomodoro_done`` / ``request_quit`` 一个路子 —— 谁有出口谁负责喊。
 """
 
 from __future__ import annotations
@@ -36,14 +44,18 @@ from PySide6.QtWidgets import QMenu, QWidget
 
 from . import facing as facinglib
 from . import menu as menulib
+from . import uitheme
 from .anim import Animator
 from .assets import AssetBank
+from .bag import Bag
 from .behavior import Brain, FPS, State
 from .config import Config, hours_since, now_stamp
+from .panel import BagPanel
 from .paths import pet_asset_dir
 from .physics import (FLING_RESTITUTION, Motion, VelocitySampler, clamp_fling)
-from .pomodoro import Pomodoro
+from .pomodoro import Pomodoro, describe as describe_span
 from .vitals import Vitals
+from .wheel_dialog import DurationDialog
 
 BASE_SIZE = 128          # 贴图逻辑边长
 TICK_MS = 33             # 约 30 FPS：足够平滑，又不会为一只挂件烧 CPU
@@ -53,15 +65,28 @@ ACTION_COOLDOWN = 0.35   # 同一个互动动作的连点保护，避免动画�
 #: 番茄钟到点时额外往上蹦这一下（比点击那下高，隔着屏幕也能看见）
 RING_HOP_SPEED = 520.0
 
+# 这里曾经有个 ``BUBBLE_LINGER_MS``（划过气泡消失前停留的毫秒数）。
+# v2.2.0 把"鼠标划过就弹状态卡片"整个删掉了，理由写在 ``pet/panel.py``
+# 开头的"状态显示的三次收缩"里 —— 一句话：桌宠常驻桌面，鼠标划过它
+# 是最高频的意外动作，每次都弹一个窗口就不是"看得见"而是打扰了。
+# 要恢复的话别只把类加回来，先想清楚"多久弹一次算打扰"。
+
 
 class PetWindow(QWidget):
     """一只住在桌面上的宠物。"""
 
     request_game = Signal(str)         # 参数是游戏标识，见 game.GAMES
     request_quit = Signal()
-    #: 番茄钟到点。参数是这一轮的分钟数 —— ``main.py`` 收下它去弹托盘气泡。
+    #: 番茄钟到点。参数是**这一轮的总秒数**（时长由用户滚轮自己定，
+    #: 1 秒 ~ 2 小时都有可能）—— ``main.py`` 收下它翻成人话再弹托盘气泡。
     #: 提醒本身不由本模块做：窗口连托盘都拿不到，谁有出口谁来喊。
     pomodoro_done = Signal(int)
+    #: 想跟用户说一句话：``(标题, 正文)``。
+    #:
+    #: 用在"买了东西放进背包""道具用掉了""状态告急"这类**不需要他立刻处理、
+    #: 但应该知道一声**的事上。出口在 ``main.py``（托盘气泡）。
+    #: 为什么不直接弹窗：桌宠的硬约束是绝不打断用户，见模块开头。
+    notify = Signal(str, str)
 
     def __init__(self, cfg: Config, bank: AssetBank, games=(), parent=None):
         super().__init__(parent)
@@ -85,6 +110,9 @@ class PetWindow(QWidget):
         # 养成状态：从存档读回来，再按"上次退出到现在"补一次离线衰减。
         # 存档里没有 last_seen（第一次跑，或者老版本升上来的档）就是 0 小时。
         self.vitals = self._load_vitals()
+
+        # 背包：小卖部买来的东西先存这儿。和养成状态一样，读存档、定期写回。
+        self.bag = Bag(self.cfg.inventory)
 
         # 番茄钟。纯计时，到点发信号。
         self.pomodoro = Pomodoro()
@@ -132,23 +160,25 @@ class PetWindow(QWidget):
         self._save_timer.timeout.connect(self._persist)
         self._save_timer.start(3000)
 
+        # 背包面板是**用到才建**（``_panel`` 初值为 None）。理由有两个：
+        # 一是没开过面板的用户不该白付一个窗口的开销；二是它要
+        # ``QApplication`` 已经在跑 —— 而这个窗口在测试里是能被造出来的，
+        # 构造期去 new 一个顶层窗口会让无界面测试变脆。
+        self._panel: BagPanel | None = None
+
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     # ================================================================ 窗口
 
     def _apply_window_flags(self) -> None:
-        flags = (Qt.WindowType.FramelessWindowHint
-                 | Qt.WindowType.Tool
-                 | Qt.WindowType.NoDropShadowWindowHint
-                 | Qt.WindowType.WindowDoesNotAcceptFocus)
-        if self.cfg.topmost:
-            flags |= Qt.WindowType.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
+        """套上"桌面挂件"那一套窗口标志。
 
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop, True)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        具体那几条（无边框 / Tool / 不抢焦点 / 透明 / 置顶）写在
+        ``uitheme.apply_overlay_flags`` —— 状态气泡要的是一模一样的一套，
+        与其抄第二遍，不如共用一份。这里只负责把 ``cfg.topmost`` 这个**开关**
+        传下去：那是本窗口自己的设置，气泡不该跟着走。
+        """
+        uitheme.apply_overlay_flags(self, topmost=bool(self.cfg.topmost))
 
     def _scaled_size(self) -> int:
         return max(48, int(round(BASE_SIZE * float(self.cfg.scale))))
@@ -231,9 +261,34 @@ class PetWindow(QWidget):
 
     # ================================================================ 番茄钟
 
-    def start_pomodoro(self, minutes: int) -> None:
-        """开始一轮专注。到点会发 ``pomodoro_done``。"""
-        self.pomodoro.start(minutes)
+    def start_pomodoro(self, seconds: int) -> None:
+        """开始一轮专注（**参数是秒**）。到点会发 ``pomodoro_done``。
+
+        时长由用户在滚轮上自己滚，所以这里收的是秒不是分钟 —— 滚轮能滚出
+        "45 秒"，用分钟当单位的话它会被四舍五入成 1 分钟。
+        """
+        self.pomodoro.start(seconds)
+
+    def pick_pomodoro(self) -> None:
+        """弹滚轮对话框选时长，选完直接开始。
+
+        **选中的值要记回存档**（``cfg.pomodoro_seconds``）：下次再点开对话框
+        就停在上次那个位置，不用从 25 分钟重新滚一遍。这是滚轮选择器比
+        固定档位好用的前提 —— 常用时长各不相同，"记住我上次选的"比
+        "给我一排预设"更贴近真实用法。
+
+        取消（reject）时什么都不做：用户点了取消就是想反悔，这时候
+        顺手开一轮倒计时是最讨厌的一种"自作聪明"。
+        """
+        dlg = DurationDialog(self.cfg.pomodoro_seconds)
+        dlg.center_on(self._screen_available())
+        if dlg.exec() != DurationDialog.DialogCode.Accepted:
+            return
+        secs = dlg.selected_seconds()
+        self.cfg.pomodoro_seconds = float(secs)
+        self.cfg.save()
+        self.start_pomodoro(secs)
+        self.notify.emit("番茄钟", f"开始专注 {describe_span(secs)}")
 
     def stop_pomodoro(self) -> None:
         self.pomodoro.stop()
@@ -247,8 +302,11 @@ class PetWindow(QWidget):
 
         **信号先发**：托盘气泡是主要提醒（用户可能正在别的窗口里，
         根本看不见桌面右下角）。蹦这一下是给"正好看得到"的情况补的。
+
+        信号带的是**本轮总秒数**，翻成人话（"25 分钟" / "45 秒"）由
+        ``main.py`` 调 ``pomodoro.describe`` 做 —— 说法只有那一份实现。
         """
-        self.pomodoro_done.emit(int(round(self.pomodoro.total_minutes)))
+        self.pomodoro_done.emit(int(round(self.pomodoro.total_seconds)))
         if self.brain.state in (State.DRAG, State.FALL):
             return
         self._begin_action(State.POKE)
@@ -260,30 +318,62 @@ class PetWindow(QWidget):
         self.show()
         self.raise_()
 
-    # ================================================================ 小卖部
+    # ================================================================ 背包
 
     def buy(self, key: str) -> None:
-        """买一样东西：扣金币、抬数值、演对应动作。
+        """买一样东西：扣金币、**放进背包**。
 
         **这里是"钱够不够"的唯一权威判定**。菜单上那个灰只是提示 ——
         菜单搭好到用户点下去之间，后台可能刚结算完一局游戏把金币变了，
         所以不足时要静默返回，而不是信任菜单的判断。
+
+        从"买下立刻生效"改成"买下入库"，是为了让用户能**挑时候用**：
+        饱食已经 90 还想买肉干、或者想打三局游戏一次买齐三种 ——
+        旧做法下这两件事都做不到（买了就浪费）。真正生效的入口是 ``use_item()``。
         """
         item = menulib.shop_item(key)
         if item is None or self.cfg.coins < item.price:
             return
 
         self.cfg.coins -= item.price
+        n = self.bag.add(key)
+        self._save_bag()
+        self.cfg.save()
+        # 告诉一声：菜单一收起就看不见了，不提示的话用户不确定买没买上
+        self.notify.emit("已放进背包", f"{item.label} ×{n}（共 {self.bag.total()} 件）")
+
+    def use_item(self, key: str) -> bool:
+        """用掉一个道具：出库、抬数值、演对应动作。返回有没有用成。
+
+        **顺序很讲究**：先 ``bag.take()``（东西不够它会整笔失败），成功了才动
+        数值。反过来的话，"点一下空背包里的道具"就成了一条白拿数值的漏洞 ——
+        而这种漏洞只在用户手快连点两下的时候才暴露，最难发现。
+        """
+        item = menulib.shop_item(key)
+        if item is None or not self.bag.take(key):
+            return False
+
         for field, amount in item.gains:
             self.vitals.boost(field, amount)
         self._save_vitals()
+        self._save_bag()
         self.cfg.save()
         self._play_gift(item.action)
+        self.notify.emit("用掉一个", f"{item.label}（还剩 {self.bag.count(key)}）")
+        return True
+
+    def _save_bag(self) -> None:
+        """把背包写回存档对象（真正落盘由 ``_persist`` 统一管）。"""
+        self.cfg.inventory = self.bag.to_dict()
 
     def _play_gift(self, action: str) -> None:
-        """买东西当场的反应 —— 扮演它对应的那个动作（吃的演 feed、玩的演 poke）。
+        """**用掉东西**当场的反应 —— 演它对应的那个动作（吃的演 feed、玩的演 poke）。
 
         动作名来自 ``menu.SHOP`` 表，认不出来就当没这回事（不崩）。
+
+        注意它现在挂在"用"而不是"买"上：买下来的那一刻狗不该有反应
+        （东西还在背包里，还没吃到嘴里）。这一点比看起来重要 ——
+        否则用户会以为买下就等于喂过了。
         """
         try:
             state = State(action)
@@ -301,15 +391,50 @@ class PetWindow(QWidget):
             self.brain.poke(seconds=self._oneshot_seconds(state))
         self._sync_anim(True)
 
+    # ================================================================ 背包面板
+
+    def open_panel(self) -> None:
+        """打开（或叫回）背包面板。
+
+        **懒建**：没点过这个菜单项的用户不该多一个窗口。建好之后留着复用 ——
+        每次点都重建的话，用户挪过位置的面板会跳回屏幕中间。
+        """
+        if self._panel is None:
+            self._panel = BagPanel(self, self.cfg)
+        self._panel.center_on(self._screen_available())
+        self._panel.show()
+        self._panel.raise_()
+        self._panel.activateWindow()
+
+    def leaveEvent(self, event) -> None:
+        """鼠标离开时顺手把面板上的数字刷一遍。
+
+        面板可能正开着，而用户刚喂过它。面板自己有 1 秒的定时器兜底，
+        这一下只是为了让他看到"喂完立刻就变"。
+
+        **这里以前还要管那个"划过就弹的状态卡片"**（进要停表、出要起表）。
+        v2.2.0 把卡片删了，理由见 ``pet/panel.py`` 开头的"状态显示的三次收缩"。
+        于是 ``enterEvent`` 整个不再需要覆盖 —— 鼠标划过桌宠现在什么都不发生，
+        状态值只在右键菜单（和托盘 tooltip）里看。
+        """
+        if self._panel is not None and self._panel.isVisible():
+            self._panel.refresh()
+        super().leaveEvent(event)
+
     def _persist(self) -> None:
-        """定期落盘：位置 + 养成状态。
+        """定期落盘：位置 + 养成状态 + 背包。
 
         以前只在"位置变了"时写，图个少写盘。但养成状态是**每帧都在变**的
         （一直在衰减），继续按"变了才写"等于每 3 秒必写一次 —— 索性就每 3 秒
         写一次，不再比来比去。一个几百字节的 JSON，这点代价可以忽略。
+
+        背包也一起写：它变化频率低（用户点一下才变），但**不能只在退出时写** ——
+        桌宠是被任务管理器结束掉也不奇怪的常驻程序，那种退出走不到
+        ``closeEvent``，最后买的几样东西就没了。
         """
         self.cfg.pos_x, self.cfg.pos_y = int(self.body.x), int(self.body.y)
         self._save_vitals()
+        self._save_bag()
         self.cfg.save()
 
     # ================================================================ 主循环
@@ -632,12 +757,17 @@ class PetWindow(QWidget):
         menu.addSeparator()
         menulib.add_interactions(menu, self)
         menulib.add_shop(menu, self, self.cfg)
+        menulib.add_bag(menu, self, self.cfg)
         menulib.add_pomodoro(menu, self)
         menulib.add_game_menu(menu, self._games, self.request_game.emit)
         menu.addSeparator()
         menulib.add_toggles(menu, self.cfg, self)
 
         menu.addSeparator()
+        # 一层就能点到。名字里不再带"状态"：状态值现在只在菜单顶上那两行看
+        # （v2.2.0 把划过弹出的卡片删了，见 pet/panel.py 开头），
+        # 这里就是背包 —— 名字和它实际管的东西对上，省得点进去找状态条。
+        menu.addAction("背包面板", self.open_panel)
         menu.addAction("左右翻向（走反了改这个）", self.flip_facing)
         menu.addAction("回到默认位置", self.reset_position)
         menu.addAction("藏进托盘", self.hide)
@@ -713,10 +843,15 @@ class PetWindow(QWidget):
     def closeEvent(self, event) -> None:
         self._timer.stop()
         self._save_timer.stop()
+        # 面板是没有父窗口的顶层窗口，留着会变成"桌宠退出了，
+        # 屏幕上还浮着一块背包面板"。
+        if self._panel is not None:
+            self._panel.close()
         self.cfg.pos_x, self.cfg.pos_y = int(self.body.x), int(self.body.y)
         # 记下"我是什么时候走的" —— 下次启动靠它算离线衰减（见 _load_vitals）。
-        # 位置和养成状态也要顺手存一次，否则最后 3 秒的衰减会白丢。
+        # 位置、养成状态、背包也要顺手存一次，否则最后 3 秒的变动会白丢。
         self.cfg.last_seen = now_stamp()
         self._save_vitals()
+        self._save_bag()
         self.cfg.save()
         super().closeEvent(event)

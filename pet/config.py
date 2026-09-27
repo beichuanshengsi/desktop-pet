@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 
 from .paths import config_path
@@ -61,6 +61,8 @@ class Config:
     play_count: int = 0             # 累计互动次数
     best_score: int = 0             # 小游戏「弹跳得分」最高分
     best_catch: int = 0             # 小游戏「接狗狗」最高分（和上面分开存，互不覆盖）
+    best_runner: int = 0            # 小游戏「跑一跑」最远分数（同上，各存各的）
+    best_2048: int = 0              # 小游戏「狗粮 2048」最高分（同上）
     launched_at: str = ""           # 首次运行时间
 
     # 养成状态的三条值。**默认值来自 pet/vitals.py**，别在这里另写一个数 ——
@@ -73,6 +75,14 @@ class Config:
     coins: int = 0
     #: 上次退出时间（ISO 字符串）。启动时拿它算离线衰减；空 = 第一次运行。
     last_seen: str = ""
+
+    #: 背包：商品 key -> 个数。**只存数量**，名字/价格/效果一律回
+    #: ``menu.SHOP`` 查 —— 商品改了价或改了描述，不用动存档，也不会出现
+    #: "存档里写的是旧名字"。解析规则见 ``pet/bag.py`` 的 ``normalize``。
+    inventory: dict[str, int] = field(default_factory=dict)
+    #: 上次在滚轮里选的番茄钟时长（**秒**）。下次打开对话框就从这儿接着滚，
+    #: 不用每次重新滚一遍 25 分钟。默认值来自 ``pet/pomodoro.py`` 的常用档位。
+    pomodoro_seconds: float = 1500.0
 
     # ---------------- 读写
 
@@ -102,6 +112,11 @@ class Config:
                     v = float(v)
                 elif isinstance(cur, str):
                     v = str(v)
+                elif isinstance(cur, dict):
+                    # 背包这类"键值对"字段：原样收下就行。**细活留给各自的模块**
+                    # （``bag.normalize`` 会剔掉下架商品、负数、非整数），
+                    # 这里只挡掉类型完全不对的情况（被手改成了一串数字）。
+                    v = v if isinstance(v, dict) else {}
             except (TypeError, ValueError):
                 continue
             setattr(cfg, k, v)

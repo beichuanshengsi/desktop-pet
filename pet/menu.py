@@ -14,16 +14,20 @@
 
 * 加一个**开关** → 在下面 ``TOGGLES`` 里加一行（两个菜单同时生效）
 * 加一样**商品** → 在下面 ``SHOP`` 里加一行（两个菜单同时生效）
-* 加一档**番茄钟时长** → 在下面 ``POMODORO_CHOICES`` 里加一个数
+* 加一档**番茄钟快捷档** → 在下面 ``POMODORO_CHOICES`` 里加一个秒数
 * 加一个**游戏** → 什么都不用改（``game.GAMES`` 是清单的唯一来源）
 * 加一个只在一边有的条目 → 留在 ``window.py`` / ``tray.py`` 里
 
 买与不买由谁决定
 ----------------
 菜单层只做两件事：**按 ``cfg.coins`` 决定商品项灰不灰**、**把 key 发出去**。
-钱够不够扣、加了哪一项、演什么动作，全在 ``PetWindow.buy()`` 里 ——
+钱够不够扣、加了哪一样、演什么动作，全在 ``PetWindow.buy()`` 里 ——
 那边的判定是权威的，菜单上的灰只是提示（菜单构建到用户点下去之间，
 金币是可能变的，比如后台刚结算完一局游戏）。
+
+**买了不等于用掉**：``PetWindow.buy()`` 只扣钱 + 把东西放进背包，
+真正生效要点「背包」里那一下（``PetWindow.use_item()``）。所以这一层里
+「小卖部」和「背包」是两个子菜单：一个管进货，一个管花掉。
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu
 
 from .config import Config
+from .pomodoro import describe
 from .vitals import LABEL as VITALS_LABEL
 
 
@@ -79,8 +84,12 @@ SHOP: tuple[ShopItem, ...] = (
              (("satiety", 50.0), ("mood", 20.0))),
 )
 
-#: 番茄钟档位（分钟）—— **加一档就在这里加一个数**。
-POMODORO_CHOICES: tuple[int, ...] = (25, 50)
+#: 番茄钟的**快捷档位**（秒）—— 加一档就在这里加一个数。
+#:
+#: 时长本身由用户滚轮自己定（1 秒 ~ 2 小时，见 ``pet/wheel_dialog.py``），
+#: 这几个只是"懒得多滚"的常用值。**单位是秒**，别再写分钟：
+#: 滚轮能滚出 45 秒这种值，清单里混着分钟和秒，迟早有人把 45 当分钟用。
+POMODORO_CHOICES: tuple[int, ...] = (60, 300, 1500, 3000)      # 1/5/25/50 分钟
 
 
 def shop_item(key: str) -> ShopItem | None:
@@ -92,10 +101,19 @@ def shop_item(key: str) -> ShopItem | None:
     return None
 
 
+def gains_text(item: ShopItem) -> str:
+    """商品/道具的效果说法，形如 ``饱食+35``。菜单和小卖部共用一份。"""
+    return "/".join(f"{VITALS_LABEL.get(f, f)}+{v:.0f}" for f, v in item.gains)
+
+
 def item_text(item: ShopItem) -> str:
-    """菜单上那一行的完整文字：名字、效果、价钱。"""
-    gains = "/".join(f"{VITALS_LABEL.get(f, f)}+{v:.0f}" for f, v in item.gains)
-    return f"{item.label}（{gains}）  {item.price} 金币"
+    """小卖部里那一行的完整文字：名字、效果、价钱。"""
+    return f"{item.label}（{gains_text(item)}）  {item.price} 金币"
+
+
+def bag_item_text(item: ShopItem, count: int) -> str:
+    """背包里那一行：名字、效果、**数量**（价钱不用写，已经买下来了）。"""
+    return f"{item.label}（{gains_text(item)}）  ×{count}"
 
 
 
@@ -117,29 +135,48 @@ def add_interactions(menu: QMenu, pet) -> None:
     menu.addAction("喂一口", pet.feed)
 
 
-def add_vitals(menu: QMenu, vitals, cfg: Config) -> QAction:
-    """顶上那一行"它现在怎么样 + 手上有多少钱"。
+def add_vitals(menu: QMenu, vitals, cfg: Config) -> list[QAction]:
+    """顶上那两行"它现在怎么样 + 手上有多少钱"。
 
     做成不可点的 action 而不是往 QMenu 里塞 ``QLabel``：自定义 widget 在不同
-    Windows 主题下的内边距不一样，而这一行只是给自己看的，不值得为它调样式。
+    Windows 主题下的内边距不一样，而这两行只是给自己看的，不值得为它调样式。
+
+    **为什么从一行变成三行**：原来这里只写一句 ``summary()``，状态不错的时候
+    就是"状态不错"四个字 —— 用户根本看不出它饱食多少、还能撑多久，
+    得再点进小卖部才知道。现在第一行直接摆三个数（复用 ``Vitals.detail()``）、
+    第二行报金币；第三行**只在真有事情时出现**（饿了 / 困了 / 有点蔫），
+    正常时那一行不存在，不会常年占着菜单宽度。
     """
-    act = menu.addAction(f"{vitals.summary()}    ·    金币 {cfg.coins}")
-    act.setEnabled(False)
-    return act
+    made: list[QAction] = []
+
+    line = menu.addAction(f"{vitals.detail()}　·　金币 {cfg.coins}")
+    line.setEnabled(False)
+    made.append(line)
+
+    if vitals.needs_attention:
+        alert = menu.addAction(f"要注意：{vitals.summary()}")
+        alert.setEnabled(False)
+        made.append(alert)
+
+    return made
 
 
 def add_shop(menu: QMenu, pet, cfg: Config) -> QMenu:
-    """小卖部子菜单。
+    """小卖部子菜单：**进货**（买下的东西会进背包，不立刻生效）。
 
     买不起的那几样**灰掉但留着**：直接不显示的话，用户根本不知道还有别的东西
     可买，也就不知道攒钱有什么用。
+
+    这个子菜单里**只有商品项是可点的**（标题行、提示行都 disabled）——
+    这条不成文的规矩值得守住：一眼扫过去能点的就是能买的。要花掉道具请去
+    「背包」，要盘点存货请去「背包面板」。
     """
     sub = menu.addMenu("小卖部")
 
-    head = sub.addAction(pet.vitals.detail())
-    head.setEnabled(False)
     money = sub.addAction(f"金币 {cfg.coins}")
     money.setEnabled(False)
+    tip = sub.addAction("买下会放进背包，到「背包」里才用掉")
+    tip.setEnabled(False)
     sub.addSeparator()
 
     for item in SHOP:
@@ -151,24 +188,61 @@ def add_shop(menu: QMenu, pet, cfg: Config) -> QMenu:
     return sub
 
 
+def add_bag(menu: QMenu, pet, cfg: Config) -> QMenu:
+    """背包子菜单：**花掉**（点一下就消耗一个、当场生效）。
+
+    和「小卖部」分工明确：那边进货、这边使用。之所以还留一个子菜单而不是
+    只给一个"打开面板"的入口 —— 用道具是高频操作，为了喂一口去开一个窗口
+    再点一下，比直接点两下菜单慢得多。
+
+    空背包时给一行灰字提示，而不是显示一个空菜单：空菜单看起来像坏了。
+
+    「打开背包面板」**不放在这里** —— 它是个一层就能点到的入口
+    （在右键菜单和托盘菜单的下半区），塞进背包子菜单就成了"想看一眼存货
+    得先点开背包"，正好和这个面板存在的理由相反。
+    """
+    sub = menu.addMenu("背包")
+
+    head = sub.addAction(f"金币 {cfg.coins}　·　共 {pet.bag.total()} 件")
+    head.setEnabled(False)
+    sub.addSeparator()
+
+    entries = pet.bag.entries()
+    if not entries:
+        empty = sub.addAction("（空的）去小卖部买点东西吧")
+        empty.setEnabled(False)
+    for item, count in entries:
+        act = sub.addAction(bag_item_text(item, count))
+        # 同样把 k 绑成默认参数，否则十个道具点哪个都是最后那个
+        act.triggered.connect(lambda _=False, k=item.key: pet.use_item(k))
+    return sub
+
+
 def add_pomodoro(menu: QMenu, pet) -> QMenu:
     """番茄钟子菜单。
 
-    跑着的时候只给「还剩 mm:ss」和「停止」—— 再列一遍 25 / 50 分钟没有意义，
-    还会让人以为点一下是"再加一轮"。
+    没在跑时：**「自定义时长…」排在最前**（滚轮能滚出 1 秒 ~ 2 小时，
+    是主入口），底下跟一排常用档位给懒得多滚的人。
+
+    跑着的时候只给「还剩 mm:ss」和「停止」—— 再列一遍档位没有意义，
+    还会让人以为点一下是"再加一轮"。剩余时间旁边带上本轮总时长，
+    因为时长现在是用户自己定的，"还剩 12:30"到底是快到头了还是刚开始，
+    光看剩余数字判断不了。
     """
     sub = menu.addMenu("番茄钟")
     pomo = pet.pomodoro
     if pomo.running:
-        head = sub.addAction(f"还剩 {pomo.label()}")
+        head = sub.addAction(f"还剩 {pomo.label()}　（共 {pomo.describe_total()}）")
         head.setEnabled(False)
         sub.addSeparator()
         sub.addAction("停止", pet.stop_pomodoro)
         return sub
 
-    for minutes in POMODORO_CHOICES:
-        sub.addAction(f"{minutes} 分钟",
-                      lambda _=False, m=minutes: pet.start_pomodoro(m))
+    sub.addAction("自定义时长…", pet.pick_pomodoro)
+    sub.addSeparator()
+    for secs in POMODORO_CHOICES:
+        sub.addAction(describe(secs),
+                      lambda _=False, s=secs: pet.start_pomodoro(s))
     return sub
 
 

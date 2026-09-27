@@ -98,6 +98,14 @@ FIELDS: tuple[tuple[str, str], ...] = (
 
 LABEL: dict[str, str] = dict(FIELDS)
 
+#: 每一项"该管了"时的说法。键与 ``FIELDS`` 的字段名一一对应 ——
+#: 菜单那行提醒、状态面板的红字、悬停气泡都用它，说法只有这一份。
+ALERT_LABEL: dict[str, str] = {
+    "satiety": "饿了",
+    "mood": "有点蔫",
+    "energy": "困了",
+}
+
 
 def _clamp(value: float) -> float:
     return max(MIN, min(MAX, float(value)))
@@ -183,6 +191,32 @@ class Vitals:
         """睡饱了没有 —— 到这条线就自然醒。"""
         return self.energy >= RESTED_AT
 
+    def alert_for(self, field: str) -> bool:
+        """某一项现在是不是"该管了"。状态面板要给哪一条标红，问它。
+
+        判断本身还是那三个属性（``hungry`` / ``sad`` / ``tired``）——
+        这里只做"字段名 → 属性"的查表，不另写一遍阈值比较。
+        另写一遍的后果是：改了 ``TIRED_AT`` 而漏改这里，面板就永远不标红。
+        """
+        return {"satiety": self.hungry, "mood": self.sad,
+                "energy": self.tired}.get(field, False)
+
+    def alerts(self) -> list[str]:
+        """当前该管一管的那几件事，按 ``FIELDS`` 的顺序列出。
+
+        **判断和措辞收在同一处**：``needs_attention``、``summary()``、
+        状态面板的红字标记都从这里取。将来加第四项（比如"口渴"）只改
+        ``FIELDS`` 和 ``ALERT_LABEL`` 两张表，三个地方一起跟上；
+        散着写的话漏改的地方不会报错，只会少提醒一次 —— 那种错最难发现。
+        """
+        return [ALERT_LABEL[name] for name, _label in FIELDS
+                if self.alert_for(name)]
+
+    @property
+    def needs_attention(self) -> bool:
+        """三项里有没有哪一项掉到该管一管的程度。"""
+        return bool(self.alerts())
+
     # ------------------------------------------------------------ 描述
 
     def summary(self) -> str:
@@ -191,16 +225,8 @@ class Vitals:
         只说**不好的**那几件事：状态正常时反而要短（"状态不错"），
         不能让一行提示常年占着菜单的宽度。
         """
-        bits: list[str] = []
-        if self.hungry:
-            bits.append("饿了")
-        if self.tired:
-            bits.append("困了")
-        if self.sad:
-            bits.append("有点蔫")
-        if not bits:
-            return "状态不错"
-        return "、".join(bits)
+        bits = self.alerts()
+        return "、".join(bits) if bits else "状态不错"
 
     def detail(self) -> str:
         """一行紧凑的三项数值，给小卖部当标题用。"""

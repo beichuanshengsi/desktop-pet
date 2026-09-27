@@ -26,23 +26,29 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from PIL import Image                                      # noqa: E402
-from PySide6.QtCore import QEvent, QPointF, Qt              # noqa: E402
-from PySide6.QtGui import QMouseEvent                       # noqa: E402
-from PySide6.QtWidgets import QApplication, QMenu            # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt     # noqa: E402
+from PySide6.QtGui import QMouseEvent, QWheelEvent         # noqa: E402
+from PySide6.QtWidgets import (QApplication, QMenu,        # noqa: E402
+                               QPushButton, QWidget)
 
 from pet import __version__                              # noqa: E402
 from pet import facing                                   # noqa: E402
 from pet import menu as menulib                          # noqa: E402
 from pet.assets import STATES as ALL_STATES               # noqa: E402
 from pet.assets import DEFAULT_SET, AssetBank, default_set_files  # noqa: E402
+from pet.bag import Bag                                   # noqa: E402
 from pet.behavior import Brain, State                     # noqa: E402
 from pet.behavior import FPS as BFPS                      # noqa: E402
 from pet.config import Config
 from pet.paths import game_asset_dir, pet_asset_dir                     # noqa: E402
 from pet.physics import (FLING_MAX, FLING_MIN, Motion, VelocitySampler,  # noqa: E402
                          clamp_fling)
-from pet.pomodoro import Pomodoro                         # noqa: E402
+from pet.pomodoro import (MAX_SECONDS, MIN_SECONDS, Pomodoro,  # noqa: E402
+                          clamp_seconds, describe, format_clock)
 from pet.vitals import FEED_GAIN, OFFLINE_FLOOR, PLAY_GAIN, Vitals  # noqa: E402
+from pet.wheel import HOUR, MINUTE, SECOND, WheelModel     # noqa: E402
+from pet.wheel_dialog import DurationDialog                # noqa: E402
+from pet.panel import BagPanel                            # noqa: E402
 from pet.window import PetWindow                          # noqa: E402
 from game import COIN_PER_SCORE, GAMES, coins_for, create_game, game_kinds  # noqa: E402
 from game.catcher import (BONE_SCORE, BONE_SIZE, CATCHER_W, COMBO_BONUS,  # noqa: E402
@@ -52,7 +58,37 @@ from game.catcher import (BONE_SCORE, BONE_SIZE, CATCHER_W, COMBO_BONUS,  # noqa
                           load_sprites)
 from game.common import GROUND_Y, W as GAME_W             # noqa: E402
 from game.common import GameWindow                         # noqa: E402
-from game.minigame import MiniGame                        # noqa: E402
+from game.common import overlapping_zones                  # noqa: E402
+from game.runner import (BASE_SPEED as RUN_BASE_SPEED,     # noqa: E402
+                         FIRST_SPAWN_DIST, GAP_SEC_MIN, GAP_SEC_START,
+                         HUD_WIDEST as RUN_HUD_WIDEST,
+                         HUD_WIDEST_PX as RUN_HUD_WIDEST_PX,
+                         HUD_ZONES as RUN_HUD_ZONES, KINDS as RUN_KINDS,
+                         MAX_SPEED as RUN_MAX_SPEED, PATTERNS as RUN_PATTERNS,
+                         PLAYER_W as RUN_PLAYER_W, PLAYER_X as RUN_PLAYER_X,
+                         Rock as RunRock, Runner, SPEED_STEP_DIST,
+                         gap_seconds_for, pick_pattern as run_pick_pattern,
+                         speed_for, tier_for)
+from game.runner import HUD_BAR as RUN_HUD_BAR             # noqa: E402
+from game.runner import hud_zone_rect as run_hud_zone_rect  # noqa: E402
+from game.g2048 import (Game2048, TARGET as G_TARGET,      # noqa: E402
+                        UNDO_LIMIT as G_UNDO_LIMIT, can_move, coins_for_tile,
+                        empty_grid, is_finished, max_tile,
+                        move as g_move, slide_line, target_ratio)
+from game.g2048 import HUD_WIDEST as G_HUD_WIDEST          # noqa: E402
+from game.g2048 import HUD_WIDEST_PX as G_HUD_WIDEST_PX    # noqa: E402
+from game.g2048 import HUD_ZONES as G_HUD_ZONES            # noqa: E402
+from game.g2048 import hud_zone_rect as g_hud_zone_rect    # noqa: E402
+from game.minigame import (BASE_HP as MG_BASE_HP,        # noqa: E402
+                           BLOCK_H as MG_BLOCK_H,
+                           BLOCK_W as MG_BLOCK_W, Block,
+                           CLEAR_BONUS_TIME, CLEAR_BONUS_TIME_MIN,
+                           COLS as MG_COLS, DROP_BY_KEY, Drop, HUD_ALIGN_RIGHT,
+                           HUD_BAR, HUD_FONT, HUD_WIDEST, HUD_WIDEST_PX,
+                           HUD_ZONES, MAX_HP as MG_MAX_HP,
+                           MAX_TIME as MG_MAX_TIME, PLAYER as MG_PLAYER, Pop,
+                           ROWS as MG_ROWS, SCORE_PER_HIT, TIME_BONUS, MiniGame,
+                           combo_mult, hud_zone_rect)
 
 PASS, FAIL = [], []
 
@@ -518,6 +554,271 @@ def main() -> int:
     check("时间到进入结算", game.over)
     check("最高分被记录", cfg.best_score == game.score, f"best={cfg.best_score}")
     game.close()
+
+    # ------------------------------------------- 弹跳得分 · v2.1.0 的玩法改动
+    section("弹跳得分 · 耐久 / 连击 / 道具")
+
+    # 这一节验的是这次改动的四条新规则：方块有耐久、"敲不穿"和"敲穿了"是
+    # 两种完全不同的处境、连击有倍率、敲碎会掉道具。
+    # 旧版一碰就碎，根本产生不了这些状态 —— 所以这些用例在旧代码下必挂，
+    # 它们就是这次重写的回归网。
+    mg = MiniGame(bank, cfg)
+    mg.show()
+    check("开局满盘", len(mg.blocks) == MG_ROWS * MG_COLS,
+          f"{len(mg.blocks)} 块")
+
+    # ---- 耐久梯度：越靠上越硬，轮次越高整体越硬，但封顶
+    mg.round_no = 1
+    check("第 1 轮：越靠上越硬",
+          mg.hp_for(0) > mg.hp_for(MG_ROWS - 1),
+          f"上 {mg.hp_for(0)} 下 {mg.hp_for(MG_ROWS - 1)}")
+    check("第 1 轮：脚边那排只要 1 下",
+          mg.hp_for(MG_ROWS - 1) == MG_BASE_HP, f"{mg.hp_for(MG_ROWS - 1)} 下")
+    mg.round_no = 2
+    check("轮次越高整体越硬", mg.hp_for(MG_ROWS - 1) == MG_BASE_HP + 1,
+          f"{mg.hp_for(MG_ROWS - 1)} 下")
+    mg.round_no = 99
+    check("耐久封顶在 MAX_HP（不封顶就从难变成磨）",
+          mg.hp_for(0) == MG_MAX_HP and mg.hp_for(MG_ROWS - 1) == MG_MAX_HP,
+          f"{MG_MAX_HP} 下")
+
+    # ---- 清台加时：越往后加得越少，但有下限
+    mg.round_no = 1
+    check("第 1 轮清台加满分",
+          mg.clear_time_bonus() == CLEAR_BONUS_TIME, f"+{mg.clear_time_bonus():.0f}s")
+    mg.round_no = 3
+    check("轮次越靠后加时越少",
+          mg.clear_time_bonus() < CLEAR_BONUS_TIME, f"+{mg.clear_time_bonus():.0f}s")
+    mg.round_no = 99
+    check("加时不会掉到 0（有个下限）",
+          mg.clear_time_bonus() == CLEAR_BONUS_TIME_MIN,
+          f"+{mg.clear_time_bonus():.0f}s")
+
+    # ---- 连击倍率：计分和 HUD 共用同一个阶梯，改了不会两边不一致
+    check("连击倍率：1~2 连是 ×1",
+          combo_mult(1) == 1 and combo_mult(2) == 1)
+    check("连击倍率：3 连起 ×2", combo_mult(3) == 2 and combo_mult(5) == 2)
+    check("连击倍率：6 连起 ×3，再往上不涨",
+          combo_mult(6) == 3 and combo_mult(99) == 3)
+
+    def fresh_block(hp: int = 3) -> Block:
+        """一个孤立方块，摆在固定位置，让"球顶上去"这件事可复现。"""
+        return Block(200.0, 300.0, 1, hp)
+
+    def ram_ball(mg_, dy: float, vy: float) -> None:
+        """把球摆到方块横向居中、纵向偏移 dy 的地方，并给它一个初速。"""
+        mg_.ball.teleport(200.0 + (MG_BLOCK_W - MG_PLAYER) / 2, 300.0 + dy)
+        mg_.ball.vy = vy
+        mg_.ball.on_ground = False
+
+    # ---- 核心规则：没敲碎 = 一堵墙；敲碎了 = 放行
+    brick = fresh_block(hp=3)
+    mg.score = 0
+    mg.combo = 0
+    mg.double_left = 0.0
+    ram_ball(mg, MG_BLOCK_H - 6, -900.0)          # 球顶在方块底面，正在上飞
+    mg._hit_block(brick, power=False)
+    check("敲一下扣一点耐久",
+          brick.hp == 2 and brick.alive and brick.damage > 0,
+          f"hp={brick.hp}/{brick.max_hp}")
+    check("没敲碎的方块把球挡回来（顶到的是底面）", mg.ball.vy > 0,
+          f"vy={mg.ball.vy:.0f}")
+    check("敲一下记 SCORE_PER_HIT 分", mg.score == SCORE_PER_HIT,
+          f"{mg.score} 分")
+
+    broken = fresh_block(hp=1)
+    mg.score = 0
+    mg.combo = 0
+    ram_ball(mg, MG_BLOCK_H - 6, -880.0)
+    mg._hit_block(broken, power=False)
+    check("耐久归零的方块出局", not broken.alive)
+    check("敲碎之后球原样继续往上（不被弹回，连击就来自这里）",
+          mg.ball.vy == -880.0, f"vy={mg.ball.vy:.0f}")
+
+    tank = fresh_block(hp=MG_MAX_HP)
+    ram_ball(mg, MG_BLOCK_H - 6, -900.0)
+    mg._hit_block(tank, power=True)
+    check("「力」生效时满耐久方块也一击必碎", not tank.alive)
+
+    lid = fresh_block(hp=3)
+    ram_ball(mg, -MG_PLAYER + 6, 700.0)           # 球在方块上面，正在下落
+    mg._hit_block(lid, power=False)
+    check("从上面踩到没碎的方块 → 借力弹起", mg.ball.vy < 0,
+          f"vy={mg.ball.vy:.0f}")
+
+    # ---- 计分真的乘上了倍率（不是只写在 HUD 上）
+    mg.score = 0
+    mg.combo = 2                                  # 下一击就是第 3 连
+    ram_ball(mg, MG_BLOCK_H - 6, -900.0)
+    mg._hit_block(fresh_block(hp=1), power=False)
+    check("第 3 连按 ×2 计分", mg.score == SCORE_PER_HIT * 2, f"{mg.score} 分")
+
+    mg.score = 0
+    mg.combo = 0
+    mg.double_left = 5.0                          # 假装刚接到「分」
+    ram_ball(mg, MG_BLOCK_H - 6, -900.0)
+    mg._hit_block(fresh_block(hp=1), power=False)
+    mg.double_left = 0.0
+    check("「分」生效时得分再翻一倍", mg.score == SCORE_PER_HIT * 2,
+          f"{mg.score} 分")
+
+    # ---- 掉落道具
+    mg.picked = 0
+    mg.power_left = mg.double_left = 0.0
+    mg.time_left = 30.0
+    mg._take_drop(Drop(0.0, 0.0, DROP_BY_KEY["time"]))
+    check("「时」加时", mg.time_left == 30.0 + TIME_BONUS, f"{mg.time_left:.0f}s")
+    mg._take_drop(Drop(0.0, 0.0, DROP_BY_KEY["power"]))
+    check("「力」进入限时状态", mg.power_left > 0, f"{mg.power_left:.0f}s")
+    mg._take_drop(Drop(0.0, 0.0, DROP_BY_KEY["double"]))
+    check("「分」进入限时状态", mg.double_left > 0, f"{mg.double_left:.0f}s")
+    check("接住一个就记一个", mg.picked == 3, f"{mg.picked} 个")
+
+    mg.time_left = MG_MAX_TIME - 1.0
+    mg._take_drop(Drop(0.0, 0.0, DROP_BY_KEY["time"]))
+    check("加时有天花板（不然手气好的一局能拖到十分钟）",
+          mg.time_left == MG_MAX_TIME, f"{mg.time_left:.0f}s")
+
+    mg.power_left = 0.0
+    mg.ball.teleport(200.0, 200.0)
+    mg.ball.on_ground = False
+    mg.drops = [Drop(200.0, 200.0, DROP_BY_KEY["power"])]
+    mg._step_drops(1 / 60)
+    check("球碰到掉下来的道具就接住", mg.power_left > 0 and not mg.drops,
+          f"场上还剩 {len(mg.drops)} 个")
+
+    mg.time_left = 30.0
+    mg.drops = [Drop(0.0, GROUND_Y - 40, DROP_BY_KEY["time"])]
+    mg.ball.teleport(float(GAME_W - MG_PLAYER), float(GROUND_Y - MG_PLAYER))
+    for _ in range(120):
+        mg._step_drops(1 / 60)
+    check("没接住的道具掉地上就消失（不会白送）",
+          not mg.drops and mg.time_left == 30.0, f"场上还剩 {len(mg.drops)} 个")
+
+    mg.rng.seed(4242)
+    roll_a = [mg._pick_drop().key for _ in range(8)]
+    mg.rng.seed(4242)
+    roll_b = [mg._pick_drop().key for _ in range(8)]
+    check("掉落抽奖走实例随机源（同种子同结果，测试才可复现）",
+          roll_a == roll_b and set(roll_a) <= set(DROP_BY_KEY),
+          "/".join(roll_a))
+
+    # ---- 汇率没被打崩
+    # 一块最多要敲 MAX_HP 下，所以"每下给几分"必须跟着调 —— 不调的话
+    # 同一局的分数会翻好几倍，小卖部的金币立刻通胀。这里按"第 1 轮满盘
+    # 全清"算一遍边界：最差（全程断连击）到最好（全程 ×3）折算出来
+    # 仍然落在 common.py 里「打一局够买一两样」的设计区间内。
+    mg.round_no = 1
+    swings = sum(mg.hp_for(r) for r in range(MG_ROWS)) * MG_COLS
+    low, high = swings * SCORE_PER_HIT, swings * SCORE_PER_HIT * 3
+    check("改完耐久之后金币量级没变（一局仍够买最贵的那样）",
+          coins_for(low) < 30 <= coins_for(high),
+          f"一局 {low}~{high} 分 → {coins_for(low)}~{coins_for(high)} 金币")
+
+    # ---- 走完整循环再验一遍"墙"和"穿透"
+    #      上面验的是 _hit_block 单个函数，这里让球真的跳一次，
+    #      确认在真正的物理循环里也是同一个结果。
+    def height_of(target_row: int, hard: bool) -> float:
+        """把整盘设成同一硬度，球从最下面跳起来，返回这一跳最高摸到哪。
+
+        每帧把掉落道具清掉、限时状态抹平。不是作弊 —— 是这一用例只问
+        "几何上过不过得去"：16% 的掉落率一旦掉出「一击必碎」又正好被球
+        接住，后面几排会被一路打穿，测到的就不是"墙"了。
+        （那个连锁本身是对的设计，只是不该混进几何判定。）
+        """
+        mg._reset_scene(first=True)
+        for b in mg.blocks:
+            b.hp = b.max_hp = 9 if (hard or b.row != MG_ROWS - 1) else 1
+        mg.score = 0
+        mg.combo = 0
+        start = [b for b in mg.blocks if b.row == target_row][0]
+        mg.ball.teleport(start.body.x + (MG_BLOCK_W - MG_PLAYER) / 2,
+                         float(GROUND_Y - MG_PLAYER))
+        mg.ball.on_ground = True
+        mg._jump()
+        top = mg.ball.y
+        for _ in range(120):
+            mg._step(1 / 60)
+            mg.drops.clear()
+            mg.power_left = mg.double_left = 0.0
+            top = min(top, mg.ball.y)
+        return top
+
+    mg._reset_scene(first=True)
+    bottom_y = [b for b in mg.blocks if b.row == MG_ROWS - 1][0].body.y
+    up_y = [b for b in mg.blocks if b.row == MG_ROWS - 2][0].body.y
+
+    blocked = height_of(MG_ROWS - 1, hard=True)
+    check("全盘都是墙时，球过不了最下面这一排",
+          blocked > bottom_y, f"最高 y={blocked:.0f}，下排上沿 y={bottom_y:.0f}")
+
+    punched = height_of(MG_ROWS - 1, hard=False)
+    check("下排能敲穿时，球能顶到上一排（这就是连击的来路）",
+          up_y < punched < bottom_y,
+          f"最高 y={punched:.0f}，落在 {up_y:.0f}~{bottom_y:.0f} 之间")
+
+    # ---- 整帧画得出来（裂纹 / 道具 / 连击 / 限时状态四条绘制路径都要走）
+    mg._reset_scene(first=True)
+    mg.blocks[0].hp = 1                            # 弄出裂纹
+    mg.drops = [Drop(300.0, 140.0, DROP_BY_KEY["power"])]
+    mg.pops.append(Pop(300.0, 200.0, "+10"))
+    mg.combo = 4
+    mg.best_combo = 6
+    mg.power_left = 4.0
+    mg.double_left = 3.0
+    frame = mg.grab()
+    check("整帧画得出来（含裂纹/道具/连击/限时状态）",
+          not frame.isNull() and frame.width() == GAME_W,
+          f"{frame.width()}×{frame.height()}")
+
+    # ---- HUD 排版：不许有两段文字落在同一片像素上
+    # 这条是**真踩过之后补的**：第一版 HUD 把「最高 385」和
+    # 「第 2 轮 · 剩 17 块」画到了同一段 x 上，两个字叠着印在一起。
+    # 逻辑用例一条都测不出来 —— 只有把验收图放大看才看见。
+    # 所以位置抽成了 HUD_ZONES / HUD_FONT 两张表，这里对表做纯几何检查：
+    #   **不查字体度量**（offscreen 平台没有字体库，量出来是方框的宽度，
+    #   拿它断言会误报），只比"登记的最宽内容放不放得下、两段有没有交叉"。
+    # 真字体的重量放在 tools/verify_v21_ui.py（跑在真实平台上）。
+    order = ["score", "combo", "best", "round", "secs"]
+    check("HUD 每一段都登记了位置 / 字号 / 最宽内容 / 实测宽度",
+          all(k in HUD_ZONES and k in HUD_FONT and k in HUD_WIDEST
+              and k in HUD_WIDEST_PX for k in order),
+          "/".join(sorted(HUD_ZONES)))
+    check("HUD 的四张表键名完全一致（漏一个就是那一段没画或没量）",
+          set(HUD_ZONES) == set(HUD_FONT) == set(HUD_WIDEST)
+          == set(HUD_WIDEST_PX) == set(order))
+
+    spans = {k: hud_zone_rect(k) for k in order}
+    clashes = [(a, b) for i, a in enumerate(order) for b in order[i + 1:]
+               if spans[a][0] < spans[b][1] and spans[b][0] < spans[a][1]]
+    check("最宽的内容下 HUD 各段互不重叠（叠字那次的回归网）",
+          not clashes,
+          "；".join(f"{k}={spans[k]}" for k in order) if not clashes
+          else f"重叠 {clashes}")
+
+    check("每段都比自己要放的最宽内容宽（HUD_WIDEST_PX 没被改小到放不下）",
+          all(HUD_ZONES[k][1] >= HUD_WIDEST_PX[k] for k in order),
+          "/".join(f"{k}:{HUD_ZONES[k][1]}>={HUD_WIDEST_PX[k]}" for k in order))
+
+    check("各段从左到右的次序与声明一致（左边是得分，右边是秒数）",
+          [k for k, _v in sorted(HUD_ZONES.items(), key=lambda kv: kv[1][0])]
+          == order)
+
+    off = [k for k in order if spans[k][0] < 0 or spans[k][1] > GAME_W]
+    check("HUD 每段都落在窗口里（不会画到窗口外面）", not off, f"越界 {off}")
+
+    check("倒计时条接在秒数右边，且不越出右边界",
+          HUD_BAR[0] >= spans["secs"][1] and HUD_BAR[0] + HUD_BAR[1] <= GAME_W,
+          f"条 {HUD_BAR} vs 秒数右端 {spans['secs'][1]}")
+
+    check("右对齐的段位数变多时朝左长（右端钉住不动，不会把进度条推走）",
+          spans["round"][1] == HUD_ZONES["round"][0] + HUD_ZONES["round"][1]
+          and spans["secs"][1] == HUD_ZONES["secs"][0] + HUD_ZONES["secs"][1],
+          f"round 右端 {spans['round'][1]} / secs 右端 {spans['secs'][1]}")
+    check("声明为右对齐的段都在 HUD 表里",
+          set(HUD_ALIGN_RIGHT) <= set(HUD_ZONES), "/".join(HUD_ALIGN_RIGHT))
+
+    mg.close()
 
     # ---------------------------------------------------------- 接狗狗
     section("接狗狗小游戏")
@@ -1061,17 +1362,42 @@ def main() -> int:
     first, last = shop_items[0], shop_items[-1]
     bw.buy(first.key)
     check("买下扣掉相应金币", bcfg.coins == 100 - first.price, f"{bcfg.coins}")
-    check("买下真的抬了对应的值",
-          bw.vitals.get(first.gains[0][0]) > 20.0,
-          f"{first.gains[0][0]} -> {bw.vitals.get(first.gains[0][0]):.1f}")
+    # v2.1.0 起"买"和"用"分开了：买下只入库，不立刻抬值 ——
+    # 否则饱食已经 90 的时候买肉干就是白扔钱，用户没有挑时候用的余地
+    check("买下只进背包，不当场生效",
+          bw.bag.count(first.key) == 1
+          and abs(bw.vitals.get(first.gains[0][0]) - 20.0) < 1e-9,
+          f"背包 ×{bw.bag.count(first.key)} / {first.gains[0][0]} "
+          f"{bw.vitals.get(first.gains[0][0]):.1f}")
+
+    bw.buy(first.key)
+    check("同一个东西可以叠着放（不然打三局攒不齐一批）",
+          bw.bag.count(first.key) == 2 and bw.bag.total() == 2,
+          repr(bw.bag))
+
+    field = first.gains[0][0]
+    before = bw.vitals.get(field)
+    used = bw.use_item(first.key)
+    check("从背包用掉一个才真的生效（扣数量 + 抬值 + 演动作）",
+          used and bw.bag.count(first.key) == 1
+          and bw.vitals.get(field) > before,
+          f"剩 ×{bw.bag.count(first.key)} / {field} "
+          f"{bw.vitals.get(field):.1f}")
+
+    bw.bag.clear()
+    before = bw.vitals.get(field)
+    check("背包空的时候用不出来，也不会白给数值",
+          bw.use_item(first.key) is False
+          and abs(bw.vitals.get(field) - before) < 1e-9)
 
     bcfg.coins = 0
-    before = bw.vitals.satiety
+    had = bw.bag.total()
     bw.buy(first.key)
     check("钱不够时静默不买（不进负数、也不给东西）",
-          bcfg.coins == 0 and abs(bw.vitals.satiety - before) < 1e-9)
+          bcfg.coins == 0 and bw.bag.total() == had)
     bw.buy("查无此物")                      # 不存在的 key：不该崩
     check("买不存在的商品不会崩", True)
+    check("用不存在的商品也不会崩", bw.use_item("查无此物") is False)
 
     bcfg.coins = 0
     poor_menu = QMenu()
@@ -1092,35 +1418,146 @@ def main() -> int:
               if not a.isSeparator() and a.isEnabled()) == len(menulib.SHOP))
 
     bcfg.coins = 999
-    bw.vitals.mood = 5.0
+    bw.bag.clear()
     clickable = [a for a in rich_sub.actions()
                  if not a.isSeparator() and a.isEnabled()]
     clickable[-1].trigger()
     check("点最后一个买到的就是最后一个（闭包没捕获错 key）",
-          bcfg.coins == 999 - last.price and bw.vitals.mood > 5.0,
-          f"剩 {bcfg.coins} 金币 / 心情 {bw.vitals.mood:.1f}")
+          bcfg.coins == 999 - last.price and bw.bag.count(last.key) == 1,
+          f"剩 {bcfg.coins} 金币 / 背包 ×{bw.bag.count(last.key)}")
+
+    # ---- 背包菜单：能点的就是手上有的，点一下就用掉
+    bag_menu = QMenu()                     # 同样必须留住，否则 sub 成野指针
+    bag_sub = menulib.add_bag(bag_menu, bw, bcfg)
+    bag_live = [a for a in bag_sub.actions()
+                if not a.isSeparator() and a.isEnabled()]
+    check("背包菜单里能点的就是手上的道具",
+          len(bag_live) == 1, "/".join(a.text() for a in bag_sub.actions()
+                                       if not a.isSeparator()))
+    last_item = menulib.shop_item(last.key)
+    field = last_item.gains[0][0] if last_item else "satiety"
+    before = bw.vitals.get(field)
+    bag_live[0].trigger()
+    check("背包里点一下就真的用掉了",
+          bw.bag.count(last.key) == 0 and bw.vitals.get(field) > before,
+          f"{bw.bag!r} / {field} {bw.vitals.get(field):.1f}")
+
+    empty_menu = QMenu()
+    empty_sub = menulib.add_bag(empty_menu, bw, bcfg)
+    check("空背包时只给一行灰提示，没有能点的东西",
+          not [a for a in empty_sub.actions()
+               if not a.isSeparator() and a.isEnabled()])
+
     bw._timer.stop()
     bw._save_timer.stop()
+
+    # ---------------------------------------------------------- 背包（纯逻辑）
+    section("背包")
+
+    check("脏存档不会崩：非字典 / 负数 / 零 / 已下架的商品 全被剔掉",
+          Bag.from_dict(None).is_empty()
+          and Bag.from_dict("坏数据").is_empty()
+          and Bag.from_dict({"treat": -3, "ball": 0, "已下架": 9}).is_empty(),
+          repr(Bag.from_dict({"treat": -3, "ball": 0, "已下架": 9})))
+    check("数量被规整成整数（存档里手写成 2.7 也不会变成 2.7 个）",
+          Bag.from_dict({"ball": 2.7}).count("ball") == 2)
+    check("存进去再读回来是一样的一包东西",
+          Bag.from_dict(Bag({"treat": 2, "ball": 1}).to_dict()).total() == 3)
+
+    bag = Bag({"treat": 1})
+    check("不够就整笔失败（不做「扣到 0 为止」，那种语义调用方必然用错）",
+          bag.take("treat", 2) is False and bag.count("treat") == 1)
+    check("拿走了就真的没了，不会留下计数为 0 的空条目",
+          bag.take("treat") is True and bag.count("treat") == 0 and bag.is_empty())
+    check("列出持有的东西时按商品清单排序（两个菜单的顺序才一致）",
+          [i.key for i, _n in Bag({"feast": 1, "treat": 1}).entries()]
+          == ["treat", "feast"],
+          repr(Bag({"feast": 1, "treat": 1})))
+
+    # ---------------------------------------------------------- 番茄钟时长
+    section("番茄钟时长：范围、读数与说法")
+
+    check("时长下限 1 秒、上限 2 小时（滚轮和 start() 都按它夹）",
+          MIN_SECONDS == 1.0 and MAX_SECONDS == 7200.0,
+          f"{MIN_SECONDS} ~ {MAX_SECONDS} 秒")
+    check("越界会被夹住，不会出现 0 秒或 3 小时",
+          clamp_seconds(0) == 1.0 and clamp_seconds(-5) == 1.0
+          and clamp_seconds(99999) == 7200.0)
+    # 存档是用户能手改的文件，进来一个字符串是真实场景。签名上这里收 float，
+    # 而这一行要证的恰恰是"类型不对也别崩" —— 所以下面这次调用必须放它过去
+    dirty_seconds = "坏数据"
+    check("时长是脏数据（手改存档）时按 1 秒处理，不抛异常",
+          clamp_seconds(dirty_seconds) == 1.0)      # type: ignore[arg-type]
+    check("读数：不到 1 小时是 mm:ss，超过就是 h:mm:ss",
+          format_clock(1500) == "25:00" and format_clock(45) == "00:45"
+          and format_clock(3723) == "1:02:03",
+          "/".join([format_clock(45), format_clock(1500), format_clock(3723)]))
+    check("倒计时归零时读数是 00:00（不是被下限夹成 00:01）",
+          format_clock(0) == "00:00", format_clock(0))
+    check("说法：翻成人话而不是报时",
+          describe(1) == "1 秒" and describe(45) == "45 秒"
+          and describe(1500) == "25 分钟" and describe(3600) == "1 小时"
+          and describe(3903) == "1 小时 5 分",
+          "/".join([describe(1), describe(45), describe(1500),
+                    describe(3600), describe(3903)]))
+
+    # ---------------------------------------------------------- 滚轮取值
+    section("滚轮时长选择器")
+
+    w = WheelModel(0)
+    check("秒列不许滚出 0：下限是 1 秒，没有 0 秒这一档",
+          w.values(SECOND)[0] == 1 and w.value == 1.0, f"{w.value}")
+    check("时列能滚出 0 / 1 / 2（上限 2 小时）",
+          w.values(HOUR) == (0, 1, 2), f"{w.values(HOUR)}")
+
+    w = WheelModel(60)                     # 0:01:00
+    w.scroll(SECOND, -1)
+    check("滚到头会绕回另一端（「滚轮下滑」的手感就来自这个循环）",
+          w.current(SECOND) == 59 and w.value == 119.0, f"{w.value}")
+    w.scroll(SECOND, 1)
+    check("往回滚一格就回到 0", w.current(SECOND) == 0 and w.value == 60.0)
+
+    w = WheelModel(3600 + 1800 + 50)       # 1:30:50
+    w.scroll(HOUR, 1)                      # 时 +1 -> 2
+    check("把「时」滚到 2 会连带把分秒清零（2:30:50 这种组合不存在）",
+          w.value == 7200.0 and w.current(MINUTE) == 0 and w.current(SECOND) == 0,
+          f"{w.value}")
+    check("此时分、秒两列都只剩 0 这一个值（滚不动了）",
+          w.values(MINUTE) == (0,) and w.values(SECOND) == (0,))
+    w.scroll(HOUR, -1)
+    check("滚回 1 小时后分秒停在 0（可预期比「记住上次」重要）",
+          w.value == 3600.0, f"{w.value}")
+
+    w = WheelModel(3600)                   # 1:00:00
+    w.scroll(MINUTE, -1)
+    check("分列也是循环的", w.current(MINUTE) == 59, f"{w.current(MINUTE)}")
+
+    w = WheelModel(1500)
+    w.choose(HOUR, 2)                      # 快捷档位点到 2 小时
+    check("快捷档位也走同一套联动规则（不会变成 2:25:00）",
+          w.value == 7200.0, f"{w.value}")
+    w.choose(MINUTE, 30)
+    check("值不在本列范围里时忽略掉，不会把滚轮弄成非法状态",
+          w.value == 7200.0, f"{w.value}")
 
     # ---------------------------------------------------------- 番茄钟
     section("番茄钟")
 
     p = Pomodoro()
     check("没启动时推进不会有反应", p.tick(10.0) is False and not p.running)
-    p.start(25.0)
-    check("启动后剩余 == 设定时长", abs(p.remaining_minutes - 25.0) < 1e-9,
-          p.label())
+    p.start(1500)                          # 25 分钟
+    check("启动后剩余 == 设定时长", abs(p.remaining - 1500) < 1e-9, p.label())
     hits = 0
-    for _ in range(25 * 60):
+    for _ in range(1500):
         if p.tick(1.0):
             hits += 1
     check("25 分钟刚好到点一次（不是每帧都喊）", hits == 1, f"hits={hits}")
     check("到点后自己停下并记下一轮",
           not p.running and p.finished_rounds == 1)
     check("停下后 label 归零，但仍记得这一轮是 25 分钟（提醒文案要用）",
-          p.label() == "00:00" and abs(p.total_minutes - 25.0) < 1e-9,
-          f"{p.label()} / {p.total_minutes:.0f} 分钟")
-    p.start(25.0)
+          p.label() == "00:00" and abs(p.total_seconds - 1500) < 1e-9,
+          f"{p.label()} / {p.describe_total()}")
+    p.start(1500)
     for _ in range(60):
         p.tick(1.0)
     check("进度与剩余时间对得上",
@@ -1128,17 +1565,36 @@ def main() -> int:
           f"{p.label()} progress={p.progress:.3f}")
     p.stop()
     check("停止后剩余归零、不再跑", not p.running and p.remaining == 0.0)
+    check("1 秒这种极限时长也能正常跑完（滚轮能滚出来就得能跑）",
+          Pomodoro().start_hms(0, 0, 1) == 1.0)
 
     pyc = Config()
     pw = PetWindow(pyc, bank, GAMES)
     got: list[int] = []
     pw.pomodoro_done.connect(got.append)
-    pw.start_pomodoro(1)                   # 1 分钟
+    pw.start_pomodoro(60)                  # 1 分钟
     for _ in range(130):
         pw._advance(0.5)                   # 共 65 秒
-    check("到点时窗口发出通知（参数是本轮的分钟数，主程序靠它弹托盘气泡）",
-          got == [1], f"{got}")
+    check("到点时窗口发出通知（参数是本轮的总秒数，主程序靠它弹托盘气泡）",
+          got == [60], f"{got}")
     check("到点后番茄钟不再是运行中", not pw.pomodoro.running)
+
+    # 菜单：快捷档位 + 自定义入口。时长现在是用户自己滚的，
+    # "自定义"必须是菜单里的常驻项，不能只有两个写死的档
+    pomo_menu = QMenu()
+    pomo_sub = menulib.add_pomodoro(pomo_menu, pw)
+    pomo_acts = [a.text() for a in pomo_sub.actions()]
+    check("番茄钟菜单里有「自定义时长…」入口（滚轮是主入口）",
+          any("自定义" in t for t in pomo_acts), "/".join(pomo_acts))
+    check("快捷档位也都在（懒得多滚的人直接点）",
+          sum(1 for t in pomo_acts if "分钟" in t) == len(menulib.POMODORO_CHOICES),
+          "/".join(pomo_acts))
+    check("档位清单的单位是秒（混着分钟迟早有人把 45 当分钟用）",
+          all(s >= 1 and s <= MAX_SECONDS for s in menulib.POMODORO_CHOICES),
+          "/".join(str(s) for s in menulib.POMODORO_CHOICES))
+    check("上次选的时长记得住（下次打开对话框停在上次那儿）",
+          isinstance(pyc.pomodoro_seconds, float)
+          and pyc.pomodoro_seconds == Config().pomodoro_seconds)
     pw._timer.stop()
     pw._save_timer.stop()
 
@@ -1269,6 +1725,407 @@ def main() -> int:
     xw.close()
     check("没结算就关掉窗口不给金币（不然看要输了就关窗最划算）",
           xcfg.coins == 0, f"{xcfg.coins}")
+
+    # ---------------------------------------------------------- 新增界面
+    section("新增界面：滚轮对话框 / 状态面板 / 悬停气泡")
+
+    # 窗口标志那份配方现在只有一份实现（uitheme.apply_overlay_flags），
+    # 桌宠和气泡共用。这一条盯着"桌宠的那几条没被搬家搬丢"。
+    uicfg = Config()
+    uw = PetWindow(uicfg, bank, GAMES)
+    check("桌宠仍然是不抢焦点、置顶、无边框的挂件窗口",
+          bool(uw.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus)
+          and bool(uw.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+          and bool(uw.windowFlags() & Qt.WindowType.FramelessWindowHint)
+          and uw.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground),
+          f"{uw.windowFlags()}")
+
+    dlg = DurationDialog(uicfg.pomodoro_seconds)
+    check("对话框打开时停在上次选的时长上",
+          dlg.selected_seconds() == int(uicfg.pomodoro_seconds),
+          f"{dlg.selected_seconds()} 秒")
+    chips = [b.text() for b in dlg.findChildren(QPushButton)
+             if b.objectName() == "chip"]
+    check("对话框上的快捷档位与菜单用的是同一份清单（说法也一致）",
+          chips == [describe(s) for s in menulib.POMODORO_CHOICES],
+          "/".join(chips))
+    dlg.picker.set_seconds(45 * 60 + 30)
+    check("滚轮摆到 45 分 30 秒，对话框读到的是同一个数",
+          dlg.selected_seconds() == 45 * 60 + 30, f"{dlg.selected_seconds()}")
+
+    # 鼠标滚轮真的接上了没有 —— 合成的 QWheelEvent 走一遍（角度 -120 = 往下滚一格）
+    before = dlg.picker.seconds()
+    pos = QPointF(10.0, 60.0)
+    dlg.picker.wheelEvent(QWheelEvent(
+        pos, pos, QPoint(0, 0), QPoint(0, -120),
+        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase, False))
+    check("鼠标滚轮能推动滚轮（下滑 = 数值增大）",
+          dlg.picker.seconds() > before,
+          f"{before} -> {dlg.picker.seconds()}")
+
+    check("对话框能离屏画出图来（paintEvent 里的错在纯逻辑用例里看不见）",
+          not dlg.grab().isNull() and not dlg.picker.grab().isNull(),
+          f"{dlg.size().width()}x{dlg.size().height()}")
+
+    uw.bag.add("treat", 2)
+    uw.bag.add("ball")
+    uw.cfg.coins = 137
+    uw.vitals.satiety = 12.0
+    panel = BagPanel(uw, uw.cfg)
+    panel.refresh()
+    check("面板读的是窗口的真实数据：金币、背包件数",
+          panel.money.text() == "137" and "共 3 件" in panel.bag_title.text(),
+          f"{panel.money.text()} / {panel.bag_title.text()}")
+    count_label, use_btn = panel._cards["treat"]
+    empty_label, empty_btn = panel._cards["feast"]
+    check("背包里有几个就写几个，没有的格子灰掉但留着",
+          count_label.text() == "×2" and use_btn.isEnabled()
+          and empty_label.text() == "×0" and not empty_btn.isEnabled(),
+          f"treat {count_label.text()} / feast {empty_label.text()}")
+    check("面板能离屏画出图来", not panel.grab().isNull(),
+          f"{panel.size().width()}x{panel.size().height()}")
+
+    before = uw.vitals.satiety
+    panel._use("treat")
+    check("面板上按「使用」= 真的用掉一个",
+          uw.bag.count("treat") == 1 and uw.vitals.satiety > before,
+          f"剩 ×{uw.bag.count('treat')} / 饱食 {uw.vitals.satiety:.1f}")
+
+    # v2.2.0：划过桌宠不再弹任何窗口。这两条是**防回退**断言 ——
+    # 那张浮卡曾经因为「状态更显眼」被加进来过一次，用户用了一天就要求撤掉。
+    # "enterEvent 不再被覆盖"是最直接的证据：没有这个覆盖，鼠标划过什么都不会发生。
+    check("鼠标划过桌宠不再弹窗（enterEvent 不再被覆盖）",
+          PetWindow.enterEvent is QWidget.enterEvent
+          and not hasattr(uw, "_bubble"),
+          f"{PetWindow.enterEvent is QWidget.enterEvent}")
+    check("背包面板里不放状态条（状态值只留一处口径）",
+          not hasattr(panel, "strip"))
+    check("面板留了一行字，告诉用户状态去哪儿看",
+          "右键" in panel.where.text(), panel.where.text())
+
+    panel.close()
+    dlg.close()
+    uw._timer.stop()
+    uw._save_timer.stop()
+
+    # ================================================== 跑一跑（v2.2.0 新增）
+    section("跑一跑")
+
+    rcfg = Config()
+
+    def fresh_run():
+        """造一个跑一跑窗口并停掉计时器 —— 用例只面对自己摆上去的场景。"""
+        w = Runner(bank, rcfg)
+        w._timer.stop()
+        return w
+
+    # ---- 难度曲线
+    check("难度：每 3000px 提一档",
+          tier_for(0) == 0 and tier_for(2999) == 0
+          and tier_for(3000) == 1 and tier_for(9000) == 3,
+          f"0→{tier_for(0)} 2999→{tier_for(2999)} 3000→{tier_for(3000)}")
+    check("难度：速度随档位上升、且有上限",
+          speed_for(0) == RUN_BASE_SPEED and speed_for(1) > speed_for(0)
+          and speed_for(99) == RUN_MAX_SPEED,
+          f"{speed_for(0):.0f} → {speed_for(1):.0f} → {speed_for(99):.0f} px/s")
+    check("难度：障碍间隔随档位缩短，且留了下限",
+          gap_seconds_for(0) == GAP_SEC_START > gap_seconds_for(6)
+          and gap_seconds_for(99) == GAP_SEC_MIN,
+          f"{gap_seconds_for(0):.2f}s → {gap_seconds_for(6):.2f}s → "
+          f"{gap_seconds_for(99):.2f}s")
+
+    # ---- 图案表
+    check("图案表里的障碍标识都在 KINDS 里（拼错了会在这条上暴露）",
+          all(k in RUN_KINDS for p in RUN_PATTERNS for k, _dx in p.parts),
+          "/".join(sorted(RUN_KINDS)))
+    check("每组图案都登记了解锁档位，最高那组是高难度的",
+          all(p.min_tier >= 0 for p in RUN_PATTERNS)
+          and RUN_PATTERNS[-1].min_tier >= 5,
+          f"{RUN_PATTERNS[-1].label} @{RUN_PATTERNS[-1].min_tier}")
+
+    # ---- 跳跃手感三件套
+    r = fresh_run()
+    r._reset_scene()
+    r.press_jump()
+    r._step(1 / 60)
+    check("按跳立刻离地、速度朝上", not r.on_ground and r.vy < 0, f"vy={r.vy:.0f}")
+
+    def apex(cut: bool) -> tuple[float, bool]:
+        """跳一次能跳多高（px）+ 1.5 秒内有没有落回来。
+
+        ``cut=True`` 在第 4 帧松手 —— 模拟"轻点一下"。
+        """
+        w = fresh_run()
+        w._reset_scene()
+        w.press_jump()
+        top = GROUND_Y
+        for i in range(90):
+            w._step(1 / 60)
+            if cut and i == 3:
+                w.release_jump()
+            top = min(top, w.feet)
+        return GROUND_Y - top, w.on_ground
+
+    (hold, hold_landed), (tap, _tap_landed) = apex(False), apex(True)
+    check("跳得起来也落得回去（顶点约 170px，1.5 秒内落地）",
+          140 < hold < 210 and hold_landed, f"按住 {hold:.0f}px")
+    check("可变跳跃高度：轻点比按住跳得矮（不是按键时间无关的固定弧线）",
+          0 < tap < hold * 0.7, f"轻点 {tap:.0f}px / 按住 {hold:.0f}px")
+
+    def air_frames(fast_fall: bool) -> int:
+        """一次跳跃从起跳到落地的帧数。"""
+        w = fresh_run()
+        w._reset_scene()
+        w.press_jump()
+        w._step(1 / 60)
+        n = 1
+        while not w.on_ground and n < 300:
+            if fast_fall:
+                w.press_crouch(True)
+            w._step(1 / 60)
+            n += 1
+        return n
+
+    slow_air, fast_air = air_frames(False), air_frames(True)
+    check("空中按 ↓ 会更快落地（快速下落）", fast_air < slow_air,
+          f"{slow_air} 帧 → {fast_air} 帧")
+
+    # ---- 判定：垂杆只能低头过
+    r._reset_scene()
+    r.rocks = [RunRock(RUN_KINDS["bird"], float(RUN_PLAYER_X))]
+    check("垂杆：站着会撞", r.collides())
+    r.press_crouch(True)
+    check("垂杆：低头能过", not r.collides())
+    r.press_crouch(False)
+    r.feet = GROUND_Y - 170.0
+    check("垂杆：跳得再高也撞 —— 「必须低头」这条规则才成立",
+          r.collides(), f"离地 170px 时判定盒 {r.hitbox()[1]:.0f}~{r.hitbox()[3]:.0f}")
+
+    # ---- 判定：矮墩要跳过去
+    r.feet = float(GROUND_Y)
+    r.rocks = [RunRock(RUN_KINDS["low"], float(RUN_PLAYER_X))]
+    check("矮墩：站着会撞", r.collides())
+    r.feet = GROUND_Y - 60.0
+    check("矮墩：跳起来能过", not r.collides())
+    check("判定盒比贴图窄一圈（宁可放过，不可错杀）",
+          r.hitbox()[0] > RUN_PLAYER_X
+          and r.hitbox()[2] < RUN_PLAYER_X + RUN_PLAYER_W,
+          f"盒 {r.hitbox()[0]:.0f}~{r.hitbox()[2]:.0f} / 贴图 "
+          f"{RUN_PLAYER_X}~{RUN_PLAYER_X + RUN_PLAYER_W}")
+
+    # ---- 撞上就结算，且用同一把尺子折算金币
+    dead_cfg = Config()
+    dead = Runner(bank, dead_cfg)
+    dead._timer.stop()
+    dead._reset_scene()
+    dead.distance = 25000.0                 # 先让它"跑够分"，才好验结算口径
+    dead.rocks = [RunRock(RUN_KINDS["low"], float(RUN_PLAYER_X))]
+    dead._step(1 / 60)
+    check("撞上就结束", dead.over, f"第 {dead.score} 分处撞上")
+    check("最高分写进 best_runner", dead_cfg.best_runner == dead.score,
+          f"best_runner={dead_cfg.best_runner}")
+    check("没碰另外三款的最高分",
+          dead_cfg.best_score == 0 and dead_cfg.best_catch == 0
+          and dead_cfg.best_2048 == 0)
+    check("金币用 coins_for 那把尺子（和另外三款一致）",
+          dead_cfg.coins == coins_for(dead.score),
+          f"{dead.score} 分 → {dead_cfg.coins} 金币")
+
+    frozen = dead.distance
+    dead._advance(1 / 60)
+    check("结算之后不再前进（画面真的停住了）", dead.distance == frozen,
+          f"{frozen:.0f}px")
+
+    # ---- 生成与清理
+    warm = fresh_run()
+    warm.rng = random.Random(5)
+    for _ in range(30):
+        warm._advance(1 / 60)
+    check("开局先热身一段，不立刻糊脸",
+          not warm.rocks and not warm.over,
+          f"0.5 秒跑了 {warm.distance:.0f}px（第一个障碍在 "
+          f"{FIRST_SPAWN_DIST:.0f}px）")
+
+    idle = fresh_run()
+    idle.rng = random.Random(5)
+    frames = 0
+    while not idle.over and frames < 1800:
+        idle._advance(1 / 60)
+        frames += 1
+    check("站着不跳迟早会撞上（障碍真的拦得住人）", idle.over,
+          f"第 {frames} 帧（{frames / 60:.1f} 秒）撞上，{idle.score} 分")
+
+    cleaner = fresh_run()
+    cleaner._reset_scene()
+    cleaner.rocks = [RunRock(RUN_KINDS["low"], -100.0)]
+    cleaner._step(1 / 60)
+    check("跑出屏幕的障碍会被清掉（不会越攒越多）", not cleaner.rocks)
+
+    # ---- HUD 排版（纯几何，不查字体 —— offscreen 下量出来的字宽是假的）
+    rspans = {n: run_hud_zone_rect(n) for n in RUN_HUD_ZONES}
+    check("跑一跑 HUD：四段文字两两不重叠", not overlapping_zones(rspans),
+          " ".join(f"{n}{v}" for n, v in sorted(rspans.items())))
+    check("跑一跑 HUD：都在窗口里",
+          all(0 <= a and b <= GAME_W for a, b in rspans.values()))
+    check("跑一跑 HUD：进度条也不压到任何一段文字",
+          all(b <= RUN_HUD_BAR[0] or a >= RUN_HUD_BAR[0] + RUN_HUD_BAR[1]
+              for a, b in rspans.values()), f"进度条 {RUN_HUD_BAR}")
+    check("跑一跑 HUD：每段都登记了最宽内容（改文案要连表一起改）",
+          set(RUN_HUD_WIDEST) == set(RUN_HUD_ZONES)
+          and set(RUN_HUD_WIDEST_PX) == set(RUN_HUD_ZONES))
+    # 这一条比"墨迹不叠"更严：它盯的是**分配出去的槽位**。
+    # 为什么需要它：墨迹宽度用的是登记表，登记值偏小就会掩盖真重叠 ——
+    # 2048 的 tile/undo 就是这么差 1px 叠上的（见 game/g2048.py 的 HUD_ZONES 注释）。
+    rslots = {n: (x, x + w) for n, (x, w) in RUN_HUD_ZONES.items()}
+    check("跑一跑 HUD：分配出去的槽位本身就不重叠（比墨迹不叠更严）",
+          not overlapping_zones(rslots),
+          " ".join(f"{n}{v}" for n, v in sorted(rslots.items())))
+
+    # ================================================== 狗粮 2048（v2.2.0 新增）
+    section("狗粮 2048 · 规则")
+
+    check("[2,2,0,0] 左滑合出 4，加 4 分",
+          slide_line([2, 2, 0, 0]) == ([4, 0, 0, 0], 4))
+    check("[2,2,2,2] 一次滑动只合成一次（[4,4] 而不是 [8]）",
+          slide_line([2, 2, 2, 2]) == ([4, 4, 0, 0], 8),
+          f"{slide_line([2, 2, 2, 2])}")
+    check("[4,4,8,8] 各合各的", slide_line([4, 4, 8, 8]) == ([8, 16, 0, 0], 24))
+    check("[2,0,0,2] 隔空也能合", slide_line([2, 0, 0, 2]) == ([4, 0, 0, 0], 4))
+    check("刚合出来的块不再参与合成（[4,2,2,0] → [4,4,0,0]）",
+          slide_line([4, 2, 2, 0]) == ([4, 4, 0, 0], 4))
+    check("没有相邻相等就只是靠左，不给分",
+          slide_line([2, 4, 2, 4]) == ([2, 4, 2, 4], 0))
+
+    gcol = ((2, 0, 0, 0), (2, 0, 0, 0), (0,) * 4, (0,) * 4)
+    grow = ((0, 0, 0, 2), (0, 0, 0, 2), (0,) * 4, (0,) * 4)
+    check("上滑把同一列合起来，且推到了最上面", g_move(gcol, "up")[0][0][0] == 4)
+    check("下滑把它推到最底下（同一列才合，不是同一行）",
+          g_move(gcol, "down")[0][3][0] == 4)
+    check("右滑把同一行推到右边并合起来",
+          g_move(((2, 0, 0, 2),) + ((0,) * 4,) * 3, "right")[0][0][3] == 4)
+    check("左滑把它推到最左边",
+          g_move(((0, 0, 0, 2),) + ((0,) * 4,) * 3, "left")[0][0][0] == 2)
+    check("不同行的两块不会合到一起（右滑两行的 2 还是 2）",
+          g_move(grow, "right")[0][0][3] == 2 and g_move(grow, "right")[0][1][3] == 2)
+    check("没推动的那一次会被认出来（不冒新块、不给分）",
+          g_move(((2, 4, 8, 16),) + ((0,) * 4,) * 3, "left")[2] is False)
+    check("推得动就是 True", g_move(gcol, "up")[2] is True)
+
+    dead_board = ((2, 4, 2, 4), (4, 2, 4, 2), (2, 4, 2, 4), (4, 2, 4, 2))
+    check("满盘且没有相邻相等的，才算真死局", not can_move(dead_board))
+    check("满盘但只要有一对相邻相等就还能动",
+          can_move(((2, 4, 2, 4), (4, 2, 4, 2), (2, 4, 2, 4), (4, 2, 4, 4))))
+    check("有空位就算还能动", can_move(empty_grid()))
+    check("该不该收：死局算收", is_finished(dead_board))
+    check("该不该收：凑到目标算收",
+          is_finished(((G_TARGET, 0, 0, 0), (0,) * 4, (0,) * 4, (0,) * 4)))
+    check("该不该收：中间状态不算",
+          not is_finished(((2, 0, 0, 0), (0,) * 4, (0,) * 4, (0,) * 4)))
+    check("max_tile 取得对（空盘是 0）",
+          max_tile(dead_board) == 4 and max_tile(empty_grid()) == 0)
+
+    check("进度条是对数的：到 512 满格",
+          target_ratio(((G_TARGET, 0, 0, 0), (0,) * 4, (0,) * 4, (0,) * 4)) == 1.0)
+    check("进度条从 16 才开始有",
+          target_ratio(((8, 0, 0, 0), (0,) * 4, (0,) * 4, (0,) * 4)) == 0.0)
+    check("进度条每翻一倍走一格（不是线性 —— 线性会在最后永远卡住）",
+          0.0 < target_ratio(((64, 0, 0, 0), (0,) * 4, (0,) * 4, (0,) * 4)) < 0.5)
+
+    check("金币按最大格折算：达成目标 512 = 56", coins_for_tile(G_TARGET) == 56,
+          f"{coins_for_tile(G_TARGET)}")
+    check("不够 8 的格子不给钱（白玩一局不该是纯负反馈）",
+          coins_for_tile(4) == 0 and coins_for_tile(8) == 8)
+    check("越大给得越多",
+          coins_for_tile(2048) > coins_for_tile(1024) > coins_for_tile(G_TARGET))
+    check("这一款和另外三款的收益在同一量级（20~80 金币）",
+          20 <= coins_for_tile(G_TARGET) <= 80, f"{coins_for_tile(G_TARGET)}")
+
+    section("狗粮 2048 · 窗口")
+    wcfg = Config()
+    g = Game2048(bank, wcfg)
+    g._timer.stop()
+    g.rng = random.Random(11)
+    g._reset_scene()
+    check("开局摆两块", sum(1 for row in g.grid for c in row if c > 0) == 2,
+          f"共 {sum(1 for row in g.grid for c in row if c > 0)} 块")
+    check("开局的块只会是 2 或 4",
+          all(c in (0, 2, 4) for row in g.grid for c in row))
+
+    g.grid = ((2, 2, 0, 0), (0,) * 4, (0,) * 4, (0,) * 4)
+    g.score = 0
+    g._history.clear()
+    g.undo_left = G_UNDO_LIMIT
+    moved = g.push("left")
+    check("推一步：合成、加分、并冒出一块新的",
+          moved and g.grid[0][0] == 4 and g.score == 4
+          and sum(1 for row in g.grid for c in row if c > 0) == 2,
+          f"{g.grid[0]} 得分 {g.score}")
+    check("推完之后就能撤销", g.can_undo())
+
+    g.undo()
+    check("撤销把棋盘和分数都退回去",
+          g.grid[0][0] == 2 and g.score == 0, f"{g.grid[0]} 得分 {g.score}")
+    check("撤销会消耗次数", g.undo_left == G_UNDO_LIMIT - 1,
+          f"剩 {g.undo_left}")
+
+    g.undo_left = 0
+    check("次数用光就不能再撤", not g.can_undo() and g.undo() is False,
+          f"剩 {g.undo_left}")
+
+    win_cfg = Config()
+    win = Game2048(bank, win_cfg)
+    win._timer.stop()
+    win.rng = random.Random(3)
+    win._reset_scene()
+    win.grid = ((256, 256, 0, 0), (0,) * 4, (0,) * 4, (0,) * 4)
+    win.score = 1000
+    win.push("left")
+    check("凑出 512 立刻结算",
+          win.over and win.won and "512" in win.label_title.text(),
+          win.label_title.text())
+    check("达成目标给的金币按最大格算（56）",
+          win_cfg.coins == coins_for_tile(G_TARGET), f"{win_cfg.coins} 金币")
+    check("最高分写进 best_2048", win_cfg.best_2048 == win.score,
+          f"best_2048={win_cfg.best_2048}")
+    check("没碰跑一跑和另外两款的最高分",
+          win_cfg.best_runner == 0 and win_cfg.best_score == 0
+          and win_cfg.best_catch == 0)
+    check("结算之后再推也不动", win.push("left") is False)
+
+    # 死局：满盘、只有一处能合，合完就没路 —— 用固定种子把新块落进那个空位。
+    # 要循环找种子，是因为冒出来的块是 2 还是 4 会决定"合完还能不能动"，
+    # 而 300 个种子里总有一个能把死局填出来（找不到就说明这条路径断了）。
+    dw = Game2048(bank, dead_cfg)
+    dw._timer.stop()
+    found_seed = None
+    for s in range(300):
+        dw.rng = random.Random(s)
+        dw.grid = ((2, 4, 2, 4), (4, 2, 4, 2), (2, 4, 2, 4), (4, 2, 4, 4))
+        dw.score = 0
+        dw.over = False
+        dw.won = False
+        dw._history.clear()
+        if dw.push("left") and dw.over:
+            found_seed = s
+            break
+    check("推不动了也会结算（死局这条路径真的走得到）", found_seed is not None,
+          f"种子 {found_seed}，结算文案「{dw.label_title.text()}」")
+    check("死局结算不标成\"达成目标\"", not dw.won)
+
+    # ---- HUD 排版（和跑一跑同一套纯几何断言）
+    gspans = {n: g_hud_zone_rect(n) for n in G_HUD_ZONES}
+    check("狗粮 2048 HUD：四段文字两两不重叠", not overlapping_zones(gspans),
+          " ".join(f"{n}{v}" for n, v in sorted(gspans.items())))
+    check("狗粮 2048 HUD：都在窗口里",
+          all(0 <= a and b <= GAME_W for a, b in gspans.values()))
+    check("狗粮 2048 HUD：每段都登记了最宽内容",
+          set(G_HUD_WIDEST) == set(G_HUD_ZONES)
+          and set(G_HUD_WIDEST_PX) == set(G_HUD_ZONES))
+    gslots = {n: (x, x + w) for n, (x, w) in G_HUD_ZONES.items()}
+    check("狗粮 2048 HUD：分配出去的槽位本身就不重叠（比墨迹不叠更严）",
+          not overlapping_zones(gslots),
+          " ".join(f"{n}{v}" for n, v in sorted(gslots.items())))
 
     # ---------------------------------------------------------- 版本号
     section("版本号")

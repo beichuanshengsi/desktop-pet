@@ -21,9 +21,11 @@ from PySide6.QtWidgets import QApplication                      # noqa: E402
 
 from pet import __version__                                      # noqa: E402
 from pet import icon as iconlib                                 # noqa: E402
+from pet import uitheme                                          # noqa: E402
 from pet.assets import AssetBank                                 # noqa: E402
 from pet.config import Config, now_stamp                        # noqa: E402
 from pet.paths import asset_dir, pet_asset_dir, user_asset_dir  # noqa: E402
+from pet.pomodoro import describe as describe_span              # noqa: E402
 from pet.tray import PetTray                                     # noqa: E402
 from pet.window import PetWindow                                 # noqa: E402
 from game import DEFAULT_GAME, GAMES, GameWindow, create_game    # noqa: E402
@@ -68,11 +70,13 @@ def apply_ui_font(qapp: QApplication) -> str | None:
 
     不同 Windows 上装的中文字体不一样，写死一个字体名迟早会在某台机器上
     变成一排方框。这里按优先级挑第一个系统里真的存在的。
+
+    回退链本身住在 ``pet/uitheme.py`` —— 游戏 HUD、滚轮对话框、状态面板
+    都从那儿取同一份，**别在这里另抄一张表**（抄了就会漂）。
     """
     from PySide6.QtGui import QFont, QFontDatabase
     available = set(QFontDatabase.families())
-    for name in ("Microsoft YaHei UI", "Microsoft YaHei", "SimHei",
-                 "Noto Sans CJK SC", "Source Han Sans SC", "DengXian"):
+    for name in uitheme.FONT_STACK:
         if name in available:
             qapp.setFont(QFont(name, 9))
             return name
@@ -97,6 +101,7 @@ class DesktopPetApp:
         self.pet.request_game.connect(self.open_game)
         self.pet.request_quit.connect(self.quit)
         self.pet.pomodoro_done.connect(self._on_pomodoro_done)
+        self.pet.notify.connect(self._on_notify)
 
         # 图标走 pet.icon：.ico 里带了 16/24/32/48/64/128/256 各尺寸，
         # Windows 按场景自己挑（托盘 16、任务栏 32、Alt-Tab 64），比自己缩 .png 清晰
@@ -166,15 +171,29 @@ class DesktopPetApp:
 
     # ------------------------------------------------------------ 番茄钟
 
-    def _on_pomodoro_done(self, minutes: int) -> None:
+    def _on_pomodoro_done(self, seconds: int) -> None:
         """番茄钟到点：弹一个托盘气泡。
 
         为什么用气泡而不是自己弹个窗口：用户设番茄钟就是为了专心做事，那一刻他
         多半正在别的窗口里。气泡会自己消失、不抢焦点，是**唯一不打断他的提醒方式**
         —— 跟桌宠自己"绝不抢焦点"那条硬约束是一路的。
+
+        参数是**秒**（时长现在由用户在滚轮上自己滚，1 秒 ~ 2 小时都可能），
+        说法交给 ``pomodoro.describe`` 统一翻 —— 别在这儿拼字符串，
+        否则"50 分钟"和"45 秒"迟早被写成同一句别扭的话。
         """
-        self.tray.showMessage("番茄钟", f"{minutes} 分钟到了，起来动一动吧",
+        self.tray.showMessage("番茄钟", f"{describe_span(seconds)}到了，起来动一动吧",
                               self.icon, 12000)
+
+    # ------------------------------------------------------------ 托盘气泡
+
+    def _on_notify(self, title: str, text: str) -> None:
+        """桌宠想跟用户说句话（买了东西、道具用掉、状态告急）。
+
+        走和番茄钟同一条路：托盘气泡，不抢焦点、不弹窗。窗口那边拿不到托盘，
+        所以它只负责 ``notify.emit()``，由这里出口 —— 跟 ``pomodoro_done`` 一个道理。
+        """
+        self.tray.showMessage(title, text, self.icon, 6000)
 
     # ------------------------------------------------------------ 退出
 

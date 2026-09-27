@@ -42,18 +42,52 @@
 - 证据：`grep -n "FPS = " -A 11 pet/behavior.py`；`grep -n "from .behavior import KEYS" pet/assets.py`
 
 ### F4 · 冒烟测试现状
-`tools/smoke_test.py` **234 项通过 / 0 失败**（输出末行「通过 234 项，失败 0 项 / 全部通过」）。
+`tools/smoke_test.py` **405 项通过 / 0 失败**（输出末行「通过 405 项，失败 0 项 / 全部通过」）。
 覆盖：素材加载（含**多套素材解析**、缺状态借 `idle` 兜底）、存档读写（含坏档）、状态机、
 物理、朝向（含**按套覆盖**）、互动动作时长与冷却、**「重力下坠」开关关掉后真的不下坠**、
 **养成状态（在线/离线衰减、阈值、睡觉回精力）**、**甩出去（手速判定与钳制）**、
-**金币折算与小卖部买卖**、**番茄钟计时与只响一次**、**接狗狗的骨头回血与带风漂移**、
+**金币折算与小卖部买卖（含"买下只进背包、状态不变"）**、**背包（增减 / 整笔失败 / 存档容错往返）**、
+**番茄钟计时与只响一次（单位：秒）**、**滚轮时长选择器（1 秒下限 / 2 小时上限 / 三列联动 / 循环）**、
+**新增界面（时长对话框吃真实 `QWheelEvent`、状态面板读数、划过气泡弹出与收起，三者离屏渲染）**、
+**接狗狗的骨头回血与带风漂移**、
+**弹跳得分的方块耐久 / 敲不穿=墙 / 敲穿=放行 / 连击倍率 / 掉落道具 / 加时天花板 / 攻不破的墙**、
 两个游戏的规则与结算、菜单接线、游戏素材前缀自动发现、
 **一个动作多套素材的随机挑选与"连续两次不重复"、多套素材下真实渲染一帧**、
 **walk 起步挑套 / 行走途中不换套 / 两套 walk 都真实渲染一帧、walk 每套左右走画出的帧不同**、
 （两个游戏各离屏渲染一帧）、
 **两个游戏窗口继承 `GameWindow` 且没有各抄一份 `closed` 信号**。
 - 证据：`"C:/Users/华硕/.workbuddy/binaries/python/envs/default/Scripts/python.exe" tools/smoke_test.py | tail -3`
-  → 实测「通过 234 项，失败 0 项 / 全部通过」
+  → 实测「通过 405 项，失败 0 项 / 全部通过」
+- **2026-09-27 深夜（见 F30，v2.2.0）**：新增 2 大段共 **62 条**，另把 3 条气泡断言
+  换成 3 条**防回退**断言（见 F30 第一节）——
+  **跑一跑**（27 条：难度分档与速度曲线、间距收紧、跳跃缓冲、
+  `apex()` 实测跳跃高度、`FAST_FALL` 真的更快落地、判定盒收窄后"看着擦过去"算过、
+  三种障碍的贴地/吊顶高度、`pick_pattern` 排除上一组、HUD 四段不叠且槽位不叠）、
+  **狗粮 2048 · 规则 + 窗口**（35 条：`slide_line` 一次只合一次、不同行的两块不合、
+  无效方向不冒块不记历史、撤销三元组 / 次数用光 / 撤销退分数、
+  目标达成结算与金币按最大格子、死局结算、HUD 同上）。
+  项数 **323 → 405**，原「323 项」作废。
+- **2026-09-27 傍晚（见 F29，v2.1.0）**：新增 2 大段共 **41 条**，并把 3 条老断言改成新语义 ——
+  **背包**（`normalize` 剔脏数据、`add`/`take`/`total`/`entries` 按 `SHOP` 排序、
+  **不够时整笔失败不做"扣到 0 为止"**、存档往返、`from_dict` 容错）、
+  **番茄钟时长**（`clamp_seconds` 夹在 1s~7200s、`hms`/`seconds_of` 往返、
+  **`format_clock(0)` 必须是 `00:00` 而不是被下限夹成 `00:01`**、`describe` 三种说法）、
+  **滚轮选择器**（`h=0,m=0` 时秒列 1..59、滚到 2 小时连带清零分秒、
+  分/秒列循环、非法值忽略、快捷档位也走同一套联动）、
+  **新增界面**（对话框停在上次选的时长、快捷档位与菜单同一份清单、
+  合成 `QWheelEvent` 后下滑 = 数值变大、面板读真实数据、格子按数量画、
+  点「使用」真的用掉一个、气泡不越界且不抢焦点、三者离屏 `grab()`）、
+  **弹跳得分·耐久/连击/道具**（`hp_for` 梯度与 `MAX_HP` 封顶、`clear_time_bonus` 递减与下限、
+  `combo_mult` 三档、敲一下扣 1 点耐久、**没敲碎的球被弹回 / 敲碎的球原样继续往上**、
+  踩顶借力、倍率真的参与计分、三种道具效果、加时天花板、接住与漏掉两条路径、
+  同种子同抽奖结果、金币量级未通胀、
+  **让球真的在物理循环里跳一次：全盘是墙就过不去 / 下排可敲穿就顶得上上一排**）。
+  「小卖部与金币」段里 3 条断言改写：原来验的是"买下就抬状态"，
+  现在验"买下只进背包、状态不变"，另加"点背包里的东西才抬状态"。
+  另有一组 **9 条 HUD 排版断言**（见 F29 第五节）：四张表键名一致、按最宽内容算的各段
+  "占用区间"两两不交叉、每段宽度够放最宽内容、左右次序、不越界、进度条不压秒数、
+  右对齐段的右端钉住。**这组断言故意不查字体度量**（offscreen 平台没有字体库）。
+  项数 **234 → 323**，原「234 项」作废。
 - **2026-09-23 午（见 F27，v2.0.0）**：新增 5 段共 **83 条** ——
   **养成状态**（衰减率、边界钳制、离线下限、吃饱/逗乐/睡觉回精力、饥饿与疲惫阈值、
   `tired`/`rested` 滞回不抖动）、**甩出去**（`VelocitySampler` 估速、过窗口的点被丢、
@@ -149,6 +183,22 @@
 | `fling_throw.png` | 632×1054 | ✗（手速靠真实时钟采样，每跑略变） | 4 种松手方式的真实轨迹，见 F28 |
 | `catch_items.png` | 990×1078 | ✗（落点与风向随机） | 真实游戏画面 + 带风落体 `x(t)` 轨迹 + 骨头占位形象 |
 
+**2026-09-27 傍晚新增 1 张**（v2.1.0，见 F29）：
+
+| 产物 | 尺寸 | 可复现？ | 说明 |
+|---|---|---|---|
+| `v21_ui.png` | 1120×2555 | **可复现**（脚本不注入时钟；落体/道具都是摆死的） | 滚轮时长对话框 + 两个滚轮（含"2 小时 → 分秒只剩 0"）+ 背包面板 + **右键菜单里的状态两行** + 打砖块一帧，五块各抓真图排成一页；跑法 `python tools/verify_v21_ui.py`。**v2.2.0 改过**：撤掉气泡那一节（原来 1120×2451），第四节换成"抓右键菜单" |
+
+**2026-09-27 深夜新增 1 张**（v2.2.0，见 F30）：
+
+| 产物 | 尺寸 | 可复现？ | 说明 |
+|---|---|---|---|
+| `v22_ui.png` | 1120×2125 | **可复现**（三姿态/两种残局都是摆死的位置；跑一跑不注入时钟，只摆一帧） | 跑一跑一帧（三种障碍同框）+ 跑一跑三种姿态（站立/低头/跳跃）+ 狗粮 2048 一帧（早局）+ 狗粮 2048 残局（含 512、外圈金边），四节竖排；跑法 `python tools/verify_v22_ui.py`。**运行时会打印两款新游戏 HUD 的"登记值 / 实量"对照，超了标 `<- 超了！`** —— 2048 的 `tile`/`undo` 差 1px 叠字就是靠它发现的 |
+
+> 这两张图**都不能用 `QT_QPA_PLATFORM=offscreen` 跑**：那个平台插件在本机字体库是空的，
+> 抓出来整张图 0 个认得的字（第一版真踩过，见 F29 第五节 / V13），
+> 而且**字体度量也不能信**（量到的是方框宽，比真值宽一倍左右）。
+
 **游戏截图不做基准**：`shot_game.png` / `shot_gameover.png` / `shot_catcher.png` /
 `shot_catcher_over.png` 每次跑都会变（道具与小狗的落点是随机的），
 实测同一份代码连跑两次 `shot_game.png` 的 md5 就不同 —— 只能看，不能当判据。
@@ -174,32 +224,40 @@
 `scale_probe.png` 362757 B），不是每次跑都生成。
 
 ### F8 · 源文件指纹（本条即全局 @版本 基准）
-`md5sum` 于 **2026-09-23 午**（v2.0.0 五大玩法落地之后，见 F27）重采：
+`md5sum` 于 **2026-09-27 深夜**（v2.2.0 撤划过气泡 / 新增跑一跑与狗粮 2048
+之后，见 F30）重采：
 ```
-b7090d586245fbc57f0733777e8c3237  main.py                        （接番茄钟完成信号 -> 托盘气泡）
-609efc1d87f4a920cb022dbd719a2ea0  pet/__init__.py                （__version__ 1.0.0 → 2.0.0）
-e7839e634e8570bdf10e1e9b3a07419d  game/__init__.py               （转出 COIN_PER_SCORE / coins_for）
-2f766fef9621059c2340a2115cd382b9  game/common.py                 ★新增金币折算 COIN_PER_SCORE / coins_for / _award_coins
-c43f489d1e97d212bb4152bf8e48be36  game/minigame.py               （结算发金币）
-ed39e56edd20be9f26712accf0a712b8  game/catcher.py                ★新增骨头落体 + 水平漂移（风）+ 结算发金币
+4e6eb36d176f3cd3d96bac85ae596ee8  main.py                        （本文件未动）
+4fc29f6fa5a9491af4b9de4787075436  pet/__init__.py                （__version__ 2.1.0 → 2.2.0）
+3396d7336c2c47a0f6c399a9591eea72  game/__init__.py               ★GAMES 2 款 → 4 款（+runner/+2048）
+76c67e07bfa8ac01490eb8719b84a076  game/common.py                 ★新增 zone_spans / overlapping_zones / measure_zone_widest + BG_RUNNER / BG_2048
+2a80f6b1b19ecf7fbb24e368c380a5b5  game/minigame.py               ★hud_zone_rect / measure_hud_widest 改为转调 common 的共享函数
+ed39e56edd20be9f26712accf0a712b8  game/catcher.py                （本文件未动）
+9393140eda33d1c07131251c8dd175ee  game/runner.py                 ★新增：跑一跑（横版跑酷，跳跃缓冲/可变跳高/快速下落/判定盒宽容）
+b4c7255aab8d2e34c4900b841261457e  game/g2048.py                  ★新增：狗粮 2048（规则层不 import Qt；金币另有尺子 coins_for_tile）
 17a44b33dc5c1cf6a53d51adbe0112c3  pet/paths.py
-d99338acc2cda8003a0eb9faad259280  pet/config.py                  ★新增 satiety/mood/energy/coins/last_seen + 时间戳
-164541b988a5f9d8a1d5cb60ecd3973d  pet/menu.py                    ★新增 SHOP / POMODORO_CHOICES + add_shop / add_pomodoro / add_vitals
-ff04b37183163251f8474ab782eb00f7  pet/vitals.py                  ★新增：养成状态（饱食/心情/精力，含离线衰减与阈值）
-9805fd8b7a96e8a88fe2287d7514663a  pet/pomodoro.py                ★新增：番茄钟计时（tick 只在到点返回一次 True）
-80c94d10643222789ff39c830914fac8  pet/window.py                  ★新增甩出去 / 养成 tick / 讨饭走向中点 / 番茄钟 / 买卖
-53808cae683e4c939b728a8fea7244ce  pet/tray.py                    ★新增动态金币与养成项 + 小卖部/番茄钟子菜单
-3919a9b5ff0e00323274631885a5b340  pet/behavior.py                ★新增 SLEEP 状态 + 滞回（rested）+ seek（走向中点）
+885f2bb87e1a2c5a6013da47783dc28f  pet/config.py                  ★新增 best_runner / best_2048
+ad88e5ffdbc285237a1a4c7993bc2a6e  pet/menu.py                    ★「状态 / 背包面板」→「背包面板」（状态条已撤）
+504a114de0682c53d7c2d6330009dace  pet/vitals.py
+17ff8dfcda51bce8f1ab24f68a9e4e8d  pet/pomodoro.py
+da7e46f0b462eb9449c6da63286172ea  pet/wheel.py
+e7ae7f9daec095ac17db1745ab297d01  pet/wheel_dialog.py
+50141d2d01ef10d1692713ab59a9172a  pet/bag.py
+dc4df0557230868dbae67607533cff38  pet/panel.py                   ★重写：删 StatusBubble / VitalsStrip，只剩 BagPanel + where 提示行
+681e6eca2f6a13ada51ff5e1ff84009c  pet/uitheme.py
+18f62d69578abf2000135603ae046323  pet/window.py                  ★删掉整个 enterEvent 覆盖与气泡定时器（划过不再有任何反应）
+bb7ff07cb2e4f69dcbbb101709689266  pet/tray.py                    ★菜单项改名（背包面板）
+3919a9b5ff0e00323274631885a5b340  pet/behavior.py
 77d71c7421dc2b9909cfe468629ca961  pet/facing.py
 45ea83f2f28d41ca312cf04a236b796b  pet/icon.py
 358a908ec3fb28951593e6df5cced09d  pet/assets.py
-dbbd40d971831fd4f2449721984441f2  pet/anim.py                    （补登记：此前漏在表外）
-9134f847ccbf166f7ab6a02b9abafac0  pet/physics.py                 ★新增 VelocitySampler / clamp_fling / FLING_*（补登记）
+dbbd40d971831fd4f2449721984441f2  pet/anim.py
+9134f847ccbf166f7ab6a02b9abafac0  pet/physics.py
 284f6ed5453abd0cb4507b83442507e6  tools/prep_sticker.py
 6d9529f7c36b51f8f3e71135ea75ac25  tools/prep_bg.py
 86bd34e3508af85015a949cb787b8749  tools/intake.py
 71c6e79a038e79f9c8a545c58371eb08  tools/render_preview.py
-f727b687c512514556af451cf130cb72  tools/smoke_test.py            （+5 段共 83 条，见 F4）
+8b019d7936d0330435c8044c1267f027  tools/smoke_test.py            ★删 3 条气泡断言、补 3 条防回退；+2 大段共 62 条（见 F4）
 1995849ed4204c8f758b91df408c19ab  tools/typecheck.py
 c4aedbe4301a671623b050f92ea9e1fe  tools/verify_desktop.py
 f0e9875c661b5c019b4edaeecb6daffc  tools/review_materials.py
@@ -208,33 +266,40 @@ d679fba574a6a7c0e6245477542855a5  tools/verify_actions.py
 936e5526fe3ed4868b435d68777bc66d  tools/verify_variants.py
 386d39f0ed978cc361e0f974116fd772  tools/verify_walk_sets.py
 af62748bc966b04916aed03d7c12a79e  tools/verify_gravity.py
-40d6b6bf1d41eeec26c18aaffb934319  tools/verify_fling.py          ★新增（甩出去验收）
-54baf54aebc183ac95c15d68fff4ffca  tools/verify_vitals.py         ★新增（养成曲线验收）
-d9dbcea7e911dbd4888ba3801483c4ef  tools/verify_catch_items.py    ★新增（骨头+漂移验收）
+40d6b6bf1d41eeec26c18aaffb934319  tools/verify_fling.py
+54baf54aebc183ac95c15d68fff4ffca  tools/verify_vitals.py
+d9dbcea7e911dbd4888ba3801483c4ef  tools/verify_catch_items.py
 ec77b118e95562fee15c5d539d379027  tools/rebuild_from_snapshot.py
 90099636f4eaeae58672f65a04ac5e1f  tools/make_icon.py
 dc8dfbf5d2728da8ffd8c47e0e0d2e66  tools/set_facing.py
+dc0d217dc807f5c9497f22913e8abb8d  tools/verify_v21_ui.py         ★删气泡那节、③ 改「背包面板」、新增「状态只在右键菜单」
+63c9fb408750ad16a354572a54459ff6  tools/verify_v22_ui.py         ★新增（v2.2.0 界面验收）
 ```
 **已删除、不再有指纹**（见 F26）：`pet/assetgen.py`、`pet/assetgen_line.py`、`pet/styles.py`、
 `tools/gen_assets.py`、`tools/make_fixtures.py`、`tools/fixtures/`、`assets/pet/*.png`、`.style_cache/`。
 
 > 改动上述任一文件后，本表中引用该文件 @版本 的条目需重新验证。
-> 最近一次变动（**2026-09-23 午**）：v2.0.0 五大玩法（甩出去 / 养成状态 / 金币小卖部 /
-> 接狗狗骨头+漂移 / 番茄钟）。**素材只增未减** —— `custom_pet/` 161 → 183 张
-> （+`sleep_*` 22 帧，见 F27），`assets/game/` 40 张、`assets/raw/` 全在。
-> F1 / F5 / F18 / F24 / F25 的结论继续成立；F4 的项数与 F7 的产物清单按 F27 重测。
-> 更早的变动见 V11 / V12 与 F26 末尾的时间线。
+> 最近一次变动（**2026-09-27 深夜**）：v2.2.0（撤划过气泡 / 新增跑一跑与狗粮 2048 /
+> HUD 登记表实量校准）。**素材零增零减** —— 这一轮同样没碰 `custom_pet/`、
+> `assets/game/`、`assets/raw/`（两款新游戏的画面全是代码画的），所以 F1 / F5 / F13 /
+> F17 / F18 / F23 / F24 / F25 / F26 全部继续成立；F4 的项数、F7 的产物清单、
+> F9 的游戏清单按 F30 重测。
+> 更早的变动见 V11 / V12 / V13 与 F26 末尾的时间线。
 
 ### F9 · 小游戏清单与接线
-`game/__init__.py` 的 `GAMES` = `(("bounce","弹跳得分",…), ("catch","接狗狗",…))`，
+`game/__init__.py` 的 `GAMES` = `(("bounce","弹跳得分",…), ("catch","接狗狗",…), ("runner","跑一跑",…), ("2048","狗粮 2048",…))`，
 标识唯一；托盘菜单与桌宠右键菜单都遍历它生成「一起玩游戏」子菜单。
-`create_game("bounce")` → `MiniGame`；`create_game("catch")` → `CatchGame`。
+`create_game("bounce")` → `MiniGame`；`create_game("catch")` → `CatchGame`；
+`create_game("runner")` → `Runner`；`create_game("2048")` → `Game2048`。
+**2026-09-27 深夜（v2.2.0）**：从 2 款扩到 **4 款**，加游戏**只动了 `game/__init__.py` 两个地方**
+（`GAMES` 加两行、`create_game()` 加两个分支），两个菜单一行没碰 —— 这套登记表扩展方式实测好用（见 F30 第六节）。
 **2026-09-23（v2.0.0）**：两个游戏**结算时都发金币** ——
 `GameWindow._finish()` 里调 `_award_coins()`，折算率是 `game/common.py` 的
 `COIN_PER_SCORE = 10`（**10 分 = 1 金币**）；`game/__init__.py` 转出 `COIN_PER_SCORE` / `coins_for`。
-**只在结算发钱**（中途关窗口不给，见 F27）。
-- 证据：`smoke_test.py` 的「游戏菜单接线」段全通过；子菜单文本实测 `['弹跳得分','接狗狗']`，
-  触发后发出的标识实测 `['bounce','catch']` @`e7839e63`(game/__init__.py)
+**只在结算发钱**（中途关窗口不给，见 F27）。**唯一的例外是 `game/g2048.py` 的 `coins_for_tile`**
+（按最大格子算，不按分数），理由见 F30 第三节。
+- 证据：`smoke_test.py` 的「游戏菜单接线」段全通过；子菜单文本实测 `['弹跳得分','接狗狗','跑一跑','狗粮 2048']`，
+  触发后发出的标识实测 `['bounce','catch','runner','2048']` @`3396d733`(game/__init__.py)
 - 证据：`grep -n "COIN_PER_SCORE\|def coins_for\|_award_coins" game/common.py`；
   实测 `coins_for(999) == 99`、`coins_for(-5) == 0`
 - 证据：`pet/tray.py`、`pet/window.py` 的菜单均为 `addMenu("一起玩游戏")` + 遍历 `GAMES`
@@ -790,6 +855,288 @@ use_gravity = bool(self.cfg.gravity) or not self.body.on_ground   # ← 错
   于是松手时 `_sync_from_window()` 把 body 拉回**窗口的旧位置**，轨迹全废（0.08s 就落地）。
   加 `_place()` 同时移动 body 与窗口后才真实。
 
+### F29 · v2.1.0 四项改进：自定义番茄钟 / 背包 / 状态面板 / 打砖块重做（2026-09-27 傍晚）
+用户要求：**在原有基础和代码结构上**改四处，并**先不写新游戏的代码**。
+
+**一、四处改动各自的问题与接法**
+
+| 改动 | 原来的问题 | 本轮接了什么 |
+|---|---|---|
+| 番茄钟自定义时长 | `POMODORO_CHOICES=(25,50)` 按**分钟**写死两档，表达不了 45 秒 | `pomodoro.py` 单位改**秒**；新增 `wheel.py`（纯逻辑规则）+ `wheel_dialog.py`（自绘三列滚轮）|
+| 背包 + 金币显示 | `buy()` **直接抬状态** —— "买了"和"吃了"是同一件事，金币只在商店里可见 | 新增 `bag.py`（纯逻辑）+ `panel.py` 的 `BagPanel`；`buy()` 改为只进背包，新增 `use_item()` |
+| 状态更显眼 | 三个数值只在 `menu.add_vitals()` 一处显示，不进菜单就看不见 | `panel.py` 三个显示面：`BagPanel` / `StatusBubble`（划过弹出）/ 托盘 tooltip |
+| 打砖块"太无聊" | 每块**一碰就碎** → 最优打法就是贴着一个地方反复跳，位置/时机/高度全不参与决策 | `minigame.py` 重做：耐久 + "敲不穿=墙" + 连击倍率 + 掉落道具 + 轮次递增 |
+
+**二、滚轮的三条联动规则**（`wheel.py` 的 `_settle()`，纯逻辑、可单测）
+
+| 情况 | 规则 | 为什么 |
+|---|---|---|
+| `h=0 且 m=0` | 秒列 1..59 | **滚不到 0** —— 最短就是 1 秒（区间下界由需求给定）|
+| `h < 2` | 分、秒列 0..59 | 上限是 2 小时，下面的位随便填 |
+| `h = 2` | 分、秒**只剩 0** | 于是滚到 2 小时会自动把分秒清零，`2:30:50` 这种超过上限的组合**不存在** |
+
+- 证据：`tools/smoke_test.py` 的「滚轮时长选择器」段 ——
+  `把「时」滚到 2 会连带把分秒清零（2:30:50 这种组合不存在）(7200.0)`、
+  `此时分、秒两列都只剩 0 这一个值（滚不动了）`、`滚回 1 小时后分秒停在 0`、
+  `值不在本列范围里时忽略掉，不会把滚轮弄成非法状态 (7200.0)`
+- 证据：`tools/smoke_test.py` 的「新增界面」段 ——
+  `鼠标滚轮能推动滚轮（下滑 = 数值增大）(2730.0 -> 6330.0)`（合成真实 `QWheelEvent`）
+
+**三、买 / 用的两段式（金币与背包的一致性）**
+
+`buy()`：扣金币 → `bag.add(key)` → 存盘 → 发 `notify`。**不动状态**。
+`use_item()`：先 `bag.take(key)`（**不够整笔失败**）→ 再抬状态 → 存盘 → `_play_gift` → 发 `notify`。
+
+- **顺序不能反**：反了会出现"状态已经涨了、东西还在背包里"的白送。
+- 证据：`tools/smoke_test.py` 的「小卖部与金币」段 —— `买下扣掉相应金币`、
+  `买下之后状态一点没动（v2.1.0：买 ≠ 用）`、`买下的东西进了背包`、
+  `点背包里的东西才抬状态`；「背包」段 —— `不够就整笔失败（不做"扣到 0 为止"）` 等。
+  v2.0.0 的旧断言「买下真的抬了对应的值」**已作废**（见第三节 V13）。
+
+**四、弹跳得分的核心改动：敲不穿 = 墙**
+
+| 规则 | 实现 |
+|---|---|
+| 球从下面顶到**没敲碎**的方块 | `vy = max(260, abs(vy) * 0.55)` —— **被挡回来** |
+| 敲碎了那块 | 方块出局，**球的 vy 一个字节都不动** → 连穿上面几排 |
+| 从上面踩到没碎的方块 | `vy = -max(340, abs(vy) * 0.60)` —— 借力弹起 |
+
+- 方块耐久 `hp_for(row) = BASE_HP + (轮次-1) + (ROWS-1-row)`，封顶 `MAX_HP = 6`。
+- 连击 `combo_mult()`：3 连 ×2、6 连 ×3；**唯一的清零条件是落地**。
+- 分数重定：`SCORE_PER_HIT = 5`（旧版"碎一块 10 分"）。**不调就会通胀** ——
+  一块最多敲 6 下，总分翻几倍，而 `COIN_PER_SCORE=10` 是按"打一局够买一两样"定的。
+- 起跳 `JUMP_V` `1000 → 1060`：旧值只到 250px（球顶 220），卡在"刚够到最上排，
+  位置稍偏就摸不到"，那会让"上面那排敲不到"变成说不清是技术还是运气的事。
+  1060 → 281px（球顶约 189），对最上排（y=232）留 40 多像素余量。
+- 加时天花板 `MAX_TIME = ROUND_TIME + 45`：没有它，手气好的一局能拖到十分钟。
+- 证据：`tools/smoke_test.py` 的「弹跳得分 · 耐久 / 连击 / 道具」段（30 条），
+  含 `没敲碎的方块把球挡回来（顶到的是底面）(vy=495)`、
+  `敲碎之后球原样继续往上（不被弹回，连击就来自这里）(vy=-880)`、
+  `从上面踩到没碎的方块 → 借力弹起 (vy=-420)`、
+  `全盘都是墙时，球过不了最下面这一排 (最高 y=336，下排上沿 y=316)`、
+  `下排能敲穿时，球能顶到上一排（这就是连击的来路）(最高 y=290，落在 274~316 之间)`、
+  `改完耐久之后金币量级没变（一局仍够买最贵的那样）(一局 180~540 分 → 18~54 金币)`。
+- 测试中踩到并记下的一个坑：那条"跳一次"的用例一开始老是失败，
+  根因是**敲穿下排后掉出的道具正好被球接住**，其中「一击必碎」把后面两排一路打穿。
+  那不是 bug 是设计生效，但污染了几何判定 —— 改成每帧清掉落物与限时状态。
+
+**五、踩到并修掉的真 bug：HUD 两段文字叠着印在一起**
+
+改版时把「最高 385」和「第 2 轮 · 剩 17 块」画到了同一段 x 上 ——
+`最高` 左对齐（起点 x=360），轮次段右对齐（终点 x=436、宽 130，起点约 306），
+两段在 360~436 上完全重合。**逻辑断言全绿**，验收图放大到 1:1 才看见。
+
+改法分两步：
+
+1. 五段文字的位置 / 字号 / "最宽内容"抽成四张表：`HUD_ZONES`（x、宽）、
+   `HUD_FONT`（字号、粗细）、`HUD_WIDEST`（每种最宽的那种内容）、
+   `HUD_WIDEST_PX`（那些内容实测多少像素）。**`_paint_hud_numbers` 一个坐标都不写。**
+   修完各段占用区间（按最宽内容算）：
+   `score=(20,122)`、`combo=(138,227)`、`best=(244,312)`、`round=(350,480)`、
+   `secs=(513,548)`、进度条 `(556,200..756)` —— 两两不交叉，条前还留 8px。
+2. 冒烟测试加一组 **9 条纯几何断言**（四张表键名一致、各段区间两两不交叉、
+   每段宽度 ≥ 登记的最宽像素、左右次序、不越界、条不压秒数、右对齐段右端钉住）。
+
+**为什么断言不查字体度量**：`QT_QPA_PLATFORM=offscreen` 那个平台插件在本机
+**字体库是空的** —— 连阿拉伯数字都画成方框，`QFontMetrics` 量出来是方框的宽度
+（比真值宽一倍左右）。第一版断言就是拿它量的，于是 5 组"重叠"全是误报，
+而真正的重叠反而被淹没。改成只比登记表（纯算术、与环境无关）之后，
+真字体的复测放在 `tools/verify_v21_ui.py`（跑在真实平台上，把登记值和实量值并排打印）。
+
+- 证据（真字体重量，与登记表完全一致）：`python tools/verify_v21_ui.py` →
+  `score 102/102、combo 89/89、best 68/68、round 130/130、secs 35/35`
+- 证据（几何断言全过）：`python tools/smoke_test.py` →
+  `最宽的内容下 HUD 各段互不重叠（叠字那次的回归网）  (score=(20, 122)；combo=(138, 227)；best=(244, 312)；round=(350, 480)；secs=(513, 548))`
+- 证据（产物）：`reports/v21_ui.png` 1120×2451
+
+**六、为什么不引 Qt 到规则层**
+
+`wheel.py` / `bag.py` / `pomodoro.py` 全部**不 import Qt**，和 `vitals.py` / `physics.py` 一致。
+理由是可单测：滚轮的边界（1 秒 / 2 小时 / `2:30:50` 不存在）、背包的整笔失败，
+这些正是最容易写错又最难在界面上点出来的地方。
+
+**七、为解决循环依赖新增 `pet/uitheme.py`**
+
+`wheel_dialog.py` 在 `pet/` 下，需要中文字体回退链；而那条链原来定义在
+`game/common.py`，`game/common.py` 又 `import pet.assets` ——
+留在 game 里就会逼出 `pet → game → pet`。于是把字体与对话框 QSS 抽到
+`pet/uitheme.py`，`game/common.py` 改成**转出**（`from pet.uitheme import FONT_STACK, ui_font`），
+两个游戏模块（`minigame.py` / `catcher.py`）**一行都不用改**。
+- 证据：`grep -n "uitheme" game/common.py pet/window.py pet/wheel_dialog.py main.py`
+
+**八、版本号与文档**
+
+`pet/__init__.py`：`2.0.0` → **`2.1.0`**；`installer.iss` 的 `#define AppVer` 同步。
+`CHANGELOG.md` 新增 v2.1.0 条目（本节即其事实底稿）；`README.md` 同步「怎么玩 /
+状态在哪看 / 小卖部+背包 / 番茄钟 / 弹跳得分 / 目录结构 / 测试 / 怎么扩展」，
+并补了 3 条本轮真踩的坑（HUD 叠字、offscreen 没字体、验收用例别让掉落道具掺进来）；
+本 FACTS 新增本节与 V13，F4 / F7 / F8 重测。
+新增 `tools/verify_v21_ui.py` → `reports/v21_ui.png`（1120×2451）。
+- 证据：`grep -n "__version__" pet/__init__.py` → `2.1.0`
+- 证据：`grep -n "AppVer" installer.iss` → `#define AppVer "2.1.0"`
+- 证据：`grep -m1 "^## v" CHANGELOG.md` → `## v2.1.0 — 2026-09-27 傍晚 · …`
+- 证据：`python tools/typecheck.py` → `0 errors, 0 warnings, 0 informations`
+- 证据：`python tools/smoke_test.py` → `通过 323 项，失败 0 项 / 全部通过`
+- 证据：`python tools/verify_v21_ui.py` → `产出 …\reports\v21_ui.png  1120x2551`（v2.2.0 改后为 2555，见 F30）
+
+### F30 · v2.2.0：撤掉划过气泡 / 新增「跑一跑」与「狗粮 2048」（2026-09-27 深夜）
+用户要求：**状态条不要一碰到狗就弹那么大个窗口**，只保留右键后的状态值；并**做 A（跑一跑）和 B（狗粮 2048）**。
+
+**一、状态显示第三次收缩（撤掉划过气泡）**
+
+状态值的出口一路收窄，这是它第三个版本：
+
+| 版本 | 出口 |
+|---|---|
+| v2.0.0 | **1 个**：右键菜单 |
+| v2.1.0 | **3 个**：右键菜单 / 背包面板顶上的状态条 / **划过弹出的气泡**（178px）|
+| **v2.2.0** | **2 个，且都要你主动点**：右键菜单第一行两行 + 托盘 tooltip |
+
+**为什么撤气泡**：判断依据是**触发频次**。桌宠常驻桌面，鼠标划过它是一天几十次的
+**意外**动作；而状态是按分钟级衰减的。高频 + 非本意 + 内容低频变化 = 纯打扰。
+所以留下的两个出口有个共同点：**都要求用户主动去点**。
+
+改法：
+- `pet/panel.py` **重写**（348→约 250 行）：删 `StatusBubble` 整个类，以及
+  `VitalsStrip` / `vitals_rows` / `_bar` / `MINI_BAR_H` / `MINI_ROW_H` / `BAR_H` /
+  `BAR_ROW_H` / `ALERT` / `NORMAL`。窗口标题「桌宠 · 状态 / 背包」→「桌宠 · 背包」。
+- `pet/window.py`：删 `BUBBLE_LINGER_MS` / `self._bubble` / `self._bubble_timer` /
+  `_show_bubble()` / `_hide_bubble()`，**以及整个 `enterEvent` 覆盖** ——
+  一去掉，`PetWindow.enterEvent` 就回到 `QWidget.enterEvent`（空实现），划过再无反应。
+  `leaveEvent` 瘦身成只刷面板，`closeEvent` 不再停气泡定时器。
+- `pet/tray.py` / `pet/menu.py`：菜单项「状态 / 背包面板」→「背包面板」，docstring 同步。
+- **补一条"它去哪儿了"**：面板里没了状态条会让人以为状态显示丢了，所以新增一行灰字
+  `BagPanel.where`：**"它饿不饿、困不困：右键它，菜单第一行"**。
+
+- 证据：`tools/smoke_test.py` 3 条**防回退**断言 ——
+  `鼠标划过桌宠不再弹窗（enterEvent 不再被覆盖）`（断言 `PetWindow.enterEvent is QWidget.enterEvent`
+  且 `not hasattr(uw, "_bubble")`）、
+  `背包面板里不放状态条（状态值只留一处口径）`（`not hasattr(panel, "strip")`）、
+  `面板留了一行字，告诉用户状态去哪儿看`（`"右键" in panel.where.text()`）
+- 证据：`tools/verify_v21_ui.py` 的 ③ 改成「背包面板」、④ 改成「状态值：只在右键菜单里」，
+  实测打印 `右键菜单尺寸 269x386` 并出图
+
+**二、跑一跑（横版跑酷）**
+
+`game/runner.py`（新增，约 500 行）。`← →` 加速减速、`空格`/`↑` 跳、`↓` 低头、`R` 重开。
+
+| 常量 | 值 | 作用 |
+|---|---|---|
+| `GRAVITY` / `JUMP_V` | 3000 / 1010 | 基础跳跃 |
+| `JUMP_BUFFER` | 0.13 s | **落地前按的跳会被记住**，否则就是丢输入 |
+| `JUMP_CUT` | 0.42 | 松手减速上升 → 可变跳跃高度 |
+| `FAST_FALL` | 2600 | 按 ↓ 加速下坠 |
+| `BASE_SPEED` / `SPEED_STEP` / `SPEED_STEP_DIST` / `MAX_SPEED` | 340 / 46 / 3000 / 780 | 难度按**跑过的距离**分档加速 |
+| `GAP_SEC_START` / `GAP_SEC_DECAY` / `GAP_SEC_MIN` | 1.55 / 0.13 / 0.55 | 障碍间距随档位收紧 |
+| `HIT_PAD_X` / `HIT_PAD_Y` | 9 / 6 | **玩家**判定盒四周收窄；障碍不收 |
+
+三种障碍（`KINDS`）：`low` 矮墩（32×42，贴地）、`tall` 高墙（48×68，贴地）、
+`bird` 垂杆（52×高，`hang=True` 吊在半空）—— 高墙与垂杆都必须低头。
+
+- **刻意不做土狼时间**（coyote time）：那是给"有边缘的平台"准备的，这条赛道是**平的**，
+  没有边缘可走空。理由写进模块 docstring。
+- **竖直运动不复用 `pet.physics.Motion`**：本项目第一次"该复用却不复用"。
+  单向运动十行算术就够，`Motion` 是为"会撞墙 / 有摩擦 / 会弹跳"的方块写的。
+- 走路帧按**跑过的距离**推进（`int(distance/52.0) % len(frames)`），不是按时间 ——
+  跑得快时脚底下也跟着快。
+- 证据：`tools/smoke_test.py` 的「跑一跑」段（27 条），含
+  `难度到顶时速度封顶在 MAX_SPEED`、`跳跃缓冲：落地前按的跳会补上`、
+  `松手后上升被截断（可变跳跃高度）`、`判定盒收窄后"看着擦过去"的算过`、
+  `三种障碍的贴地/吊顶高度符合 KINDS`、`HUD 四段不叠且槽位不叠`
+
+**三、狗粮 2048**
+
+`game/g2048.py`（新增，约 450 行）。`↑↓←→` 滑、`Z` 撤销（一局 3 次）、`R` 重开，
+凑出 **512** 就结算。**规则层一行 Qt 都不 import**（`slide_line` / `move` /
+`can_move` / `max_tile` / `is_finished` / `coins_for_tile` / `target_ratio`）。
+
+| 点 | 做法 | 不这样做会怎样 |
+|---|---|---|
+| 一次滑动只合一次 | `slide_line` 用 `i += 2` 跳过刚合成的格子 | `2 2 2 2` 会一路合成 `8` |
+| 无效方向不冒块、不记历史 | `move()` 返回"有没有真动"，没动就不 spawn、不入栈 | 顶到墙也能刷出新块 / 能空撤销 |
+| 撤销存三元组 | `_history` 存 `(grid, score, undo_left)` | 只存棋盘 → 撤销退分数但不退次数，越撤越多 |
+| **金币另有尺子** | `coins_for_tile` 按**最大格子**：`(exp-2)*8`，512→56 | 按分数折算会通胀（两个 256 合成 512 一次 +512 分）|
+| 目标进度条是**对数**的 | `bit_length()` 算 | 线性的永远卡在 90%，看着像坏了 |
+
+> **两把金币尺子**的代价写进了两侧注释：`game/common.py` 的 `coins_for`
+> （分数 `// 10`，bounce/catch/runner 用）与 `game/g2048.py` 的 `coins_for_tile`
+> （最大格子，2048 用），改汇率要记得两处。
+
+- `is_finished()` 抽成纯函数的**唯一目的**就是让"死局"这条难在窗口层构造的路径可单测 ——
+  测试里循环 300 个种子找一个真能撞出死局的种子（实测种子 0 就能）。
+- `_DIRECTION_KEYS` 写在**类外**：类体里引用 `Qt` 常量拼错要到运行时才炸。
+- 证据：`tools/smoke_test.py` 的「狗粮 2048 · 规则」+「狗粮 2048 · 窗口」段（35 条），含
+  `一次滑动只合一次（2 2 2 2 右滑出 0 0 4 4）`、`不同行的两块不会合到一起`、
+  `无效方向不冒块、不记历史`、`撤销把棋盘和分数都退回去`、`次数用光就不能再撤`、
+  `凑出 512 立刻结算`、`达成目标给的金币按最大格算（56）`、
+  `推不动了也会结算（死局这条路径真的走得到）(种子 0)`、`死局结算不标成"达成目标"`
+
+**四、踩到并修掉的真 bug：HUD 登记表是"估"出来的（叠字第二次犯）**
+
+复用 v2.1.0 那套 HUD 登记表时，`HUD_WIDEST_PX` 是照着弹跳得分的经验**估**的，
+一跑验收脚本就三处超了：
+
+```
+tier   第 99 档      52 / 57  <- 超了！
+speed  780 px/s     62 / 65  <- 超了！
+tile   最大 2048     62 / 71  <- 超了！
+```
+
+其中 2048 的 `tile`（x=214 宽 76）与 `undo`（x=296 宽 64）**差 1px 就叠上了**。
+**最阴的一点：冒烟测试用的就是登记值，登记值偏小反而查不出真重叠。**
+
+改法三步：
+1. 按实量校准：runner `tier=57 / speed=65`，g2048 `tile=71 / undo=47`；
+   重排 `HUD_ZONES`（`tile` 宽 76、`undo` x=296 宽 64、`HUD_BAR=(380,360)`）。
+2. 两处注释写明**"估计宽度没有意义，这张表只能是量出来的"**。
+3. 断言升级：从"墨迹不叠"改成"**分配出去的槽位本身就不重叠**" ——
+   墨迹不叠会被"某段恰好比最宽内容还短"骗过去，槽位不叠不会。
+
+- 证据（修完实量与登记完全一致）：
+  `python tools/verify_v22_ui.py` →
+  `score 102/102、best 68/68、tier 57/57、speed 65/65`；
+  `score 102/102、best 68/68、tile 71/71、undo 47/47`；三处 `<- 超了！` 全部消失
+- 证据：`tools/smoke_test.py`
+  `跑一跑 HUD：分配出去的槽位本身就不重叠（比墨迹不叠更严）`、
+  `狗粮 2048 HUD：分配出去的槽位本身就不重叠（比墨迹不叠更严）`
+
+**五、共享 HUD 算术收敛到 `game/common.py`**
+
+三款游戏的 HUD 排版判断原本各一份，抽成三个共享函数：
+
+| 函数 | 干什么 |
+|---|---|
+| `zone_spans(zones, widest_px, right_aligned)` | "槽位 + 最宽内容" → 占用区间；右对齐段按右端钉住往左推 |
+| `overlapping_zones(spans)` | 两两相撞的是哪几对 |
+| `measure_zone_widest(fonts, widest)` | 量真实像素宽（**须真实平台**，offscreen 没字体库）|
+
+`minigame.py` 的 `hud_zone_rect` / `measure_hud_widest` 改为转调它们；
+`runner.py` / `g2048.py` 直接用。
+- 证据：`grep -n "zone_spans\|overlapping_zones\|measure_zone_widest" game/*.py`
+
+**六、登记表扩展方式复验**
+
+加这两款游戏**只动了 `game/__init__.py` 两处**：`GAMES` 加两行、`create_game()` 加两个分支。
+两个菜单（桌宠右键 + 托盘）自动继承，一行没碰。
+- 证据：`tools/smoke_test.py`「游戏菜单接线」段实测
+  `弹跳得分/接狗狗/跑一跑/狗粮 2048`、标识 `bounce/catch/runner/2048`
+
+**七、版本号与文档**
+
+`pet/__init__.py`：`2.1.0` → **`2.2.0`**；`installer.iss` 的 `#define AppVer` 同步。
+`CHANGELOG.md` 新增 v2.2.0 条目（本节即其事实底稿）；`README.md` 同步
+「怎么玩 / 状态在哪看 / 四个游戏 / 目录结构 / 测试 / 怎么扩展 / 已知坑」，
+并补了 2 条本轮真踩的坑（"有、但用不上"的功能也是负担；自绘宽度不能估只能量）；
+本 FACTS 新增本节与 V14，F4 / F7 / F8 / F9 重测。
+新增 `tools/verify_v22_ui.py` → `reports/v22_ui.png`（1120×2125）。
+- 证据：`grep -n "__version__" pet/__init__.py` → `2.2.0`
+- 证据：`grep -n "AppVer" installer.iss` → `#define AppVer "2.2.0"`
+- 证据：`grep -m1 "^## v" CHANGELOG.md` → `## v2.2.0 — 2026-09-27 深夜 · …`
+- 证据：`python tools/typecheck.py` → `0 errors, 0 warnings, 0 informations`
+- 证据：`python tools/smoke_test.py` → `通过 405 项，失败 0 项 / 全部通过`
+- 证据：`python tools/verify_v22_ui.py` → `产出 …\reports\v22_ui.png  1120x2125`
+- 证据：`python tools/verify_v21_ui.py` → `产出 …\reports\v21_ui.png  1120x2555`
+
 ## 二、推断区（每条附证伪命令；给不出证伪方法的推断不许留）
 
 ### I1 · 桌宠实例在跑时会周期性改写 `config.json`
@@ -946,3 +1293,57 @@ v2.0.0 五大玩法（见 F27）落地后，下列旧结论一律作废（新值
 > **旧 `@版本` 提醒**：F1…F26 条目里写在 2026-09-23 之前的 `@` 代码一律失效，
 > 以 **F8 的新指纹表**为准。特别是 F4 末尾那串 `@84631331` 系列，已换成 F4 末尾的新串。
 
+
+### V13 · ~~F8 的 v2.0.0 指纹表 / F4「234 项」/ 「版本 v2.0.0」/ 「买下就抬状态」~~（2026-09-27 傍晚作废）
+v2.1.0 四项改进（见 F29）落地后，下列旧结论一律作废（新值见 F8 / F4 / F29）：
+
+| 旧值 | 现值 | 依据 |
+|---|---|---|
+| `pet/__init__.py` 的 `__version__` = `2.0.0` | **`2.1.0`**（`installer.iss` 的 `AppVer` 同步） | F29 |
+| `CHANGELOG.md` 首条 = `## v2.0.0` | **`## v2.1.0 — 2026-09-27 傍晚 · …`** | F29 |
+| 冒烟 **234 项** | **323 项**（+2 大段共 41 条，另 3 条改写） | F4 |
+| `POMODORO_CHOICES=(25, 50)`，**单位是分钟** | **`(60, 300, 1500, 3000)`，单位是秒** | F29 / `pet/menu.py` |
+| `Pomodoro.remaining_minutes` / `total_minutes` | **`remaining` / `total_seconds`**（单位改秒） | F29 / `pet/pomodoro.py` |
+| 「小卖部买下就抬状态」（v2.0.0 `buy()` 的行为） | **买下只进背包、状态不变**；抬状态是 `use_item()` 的事 | F29 / `pet/window.py` |
+| 「番茄钟只有 25 / 50 两档」 | **1 秒 ~ 2 小时**，三列滚轮自选，另加 4 个快捷档位 | F29 |
+| 「状态只在商店菜单里看得到」 | **三个显示面**：状态面板 / 鼠标划过气泡 / 托盘 tooltip | F29 |
+| `game/minigame.py`：方块**一碰就碎**、`SCORE_PER_HIT` 等价于「碎一块 10 分」 | 方块有**耐久**（封顶 6）；敲一下 **5 分**；**没敲碎的方块会挡球** | F29 |
+| 「弹跳得分很无聊：贴着一个地方反复跳就行」 | 连击倍率（3 连 ×2 / 6 连 ×3）+ 掉落道具 + 轮次递增，位置与高度重新变得有意义 | F29 |
+| 中文字体回退链定义在 `game/common.py` 里 | **搬到 `pet/uitheme.py`**，`game/common.py` 改为转出（解 `pet → game → pet` 循环） | F29 |
+| `pet/menu.py` 只在「小卖部」里显示金币 | 另加 `add_bag`（🎒 背包）与「状态 / 背包面板」两项 | F29 |
+| 弹跳得分 HUD 的坐标散在 `_paint_hud_numbers` 的 `drawText` 实参里 | 抽成 `HUD_ZONES` / `HUD_FONT` / `HUD_WIDEST` / `HUD_WIDEST_PX` 四张表，绘制函数不写坐标 | F29 |
+| 「HUD 排版这种事只能靠眼睛看」 | 有五段文字各占多少 x 是可算的 —— 已有 **9 条纯几何断言**盯着（不查字体度量） | F4 / F29 |
+| 「offscreen 平台跑测试最省事，抓图也能用」 | **抓图不能用**（没有字体，全画成方框）；**字体度量也不能信** | F29 第五节 |
+
+> **旧 `@版本` 提醒**：F1…F28 条目里写在 2026-09-27 之前的 `@` 代码一律失效，
+> 以 **F8 的新指纹表**为准（2026-09-27 傍晚重采）。
+
+
+### V14 · ~~F8 的 v2.1.0 指纹表 / F4「323 项」/「版本 v2.1.0」/「状态三个显示面」/「划过气泡」/「两个游戏」~~（2026-09-27 深夜作废）
+v2.2.0（见 F30）落地后，下列旧结论一律作废（新值见 F8 / F4 / F9 / F30）：
+
+| 旧值 | 现值 | 依据 |
+|---|---|---|
+| `pet/__init__.py` 的 `__version__` = `2.1.0` | **`2.2.0`**（`installer.iss` 的 `AppVer` 同步） | F30 |
+| `CHANGELOG.md` 首条 = `## v2.1.0` | **`## v2.2.0 — 2026-09-27 深夜 · …`** | F30 |
+| 冒烟 **323 项** | **405 项**（+2 大段共 62 条，另 3 条气泡断言换成防回退） | F4 |
+| 状态值有**三个显示面**（菜单 / 面板状态条 / 划过气泡） | **两个**：右键菜单第一行 + 托盘 tooltip，**都要主动点** | F30 第一节 |
+| `pet/panel.py` 有 `StatusBubble`（划过弹 178px 卡片）+ `VitalsStrip` | **两者都已删除**，只剩 `BagPanel` + 一行 `where` 灰字 | F30 第一节 |
+| `PetWindow` 覆盖了 `enterEvent` | **不再覆盖**（`PetWindow.enterEvent is QWidget.enterEvent`），划过无任何反应 | F30 第一节 |
+| `pet/panel.py` 窗口标题「桌宠 · 状态 / 背包」 | **「桌宠 · 背包」** | F30 第一节 |
+| 「菜单里只有 **1** 个子菜单（一起玩游戏）/ V13 写的"3 个" | **4 个**：小卖部 / 背包 / 番茄钟 / 一起玩游戏（V13 那行漏算了「背包」，是笔误） | F30 第六节 |
+| `GAMES` = **2 款**（bounce / catch） | **4 款**（+ `runner` 跑一跑 / `2048` 狗粮 2048） | F9 / F30 |
+| 小游戏总共**两个** | **四个** | F9 |
+| HUD 登记表只有 `minigame.py` 一份、算术各写各的 | 抽到 **`game/common.py`**：`zone_spans` / `overlapping_zones` / `measure_zone_widest`，三款游戏共用 | F30 第五节 |
+| `HUD_WIDEST_PX` 可以"照着经验估" | **只能量** —— 估出来的三处全偏小，2048 的 `tile`/`undo` 差 1px 叠字 | F30 第四节 |
+| HUD 断言只到"墨迹不叠" | 升级为"**槽位本身不叠**"（更严） | F30 第四节 |
+| 「金币折算只有一把尺子 `coins_for`」 | **两把**：`coins_for`（分数 // 10）与 `coins_for_tile`（2048 专用，按最大格子） | F9 / F30 第三节 |
+| `reports/` 里界面验收图只有 `v21_ui.png`（1120×2451） | **+`v22_ui.png`（1120×2125）**；`v21_ui.png` 改成 1120×2555（撤气泡那节、④ 换抓右键菜单） | F7 / F30 |
+| 冒烟项数在各个 README 里写作 314 | **405** | F4 |
+
+> **另外纠正 V13 的一处笔误**：V13 说 v2.1.0 的子菜单是"**3 个**（小卖部 / 番茄钟 /
+> 一起玩游戏）"，漏了同版加的「背包」—— v2.1.0 起实际就是 **4 个**（见上表）。
+> 这类"改了一处忘了另一处"正是本文档要靠 F8 指纹 + 冒烟断言一起守的原因。
+
+> **旧 `@版本` 提醒**：F1…F29 条目里写在 2026-09-27 深夜之前的 `@` 代码一律失效，
+> 以 **F8 的新指纹表**为准（2026-09-27 深夜重采）。

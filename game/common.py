@@ -17,8 +17,13 @@ from pathlib import Path
 from time import perf_counter
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+
+#: 字体回退链与自绘字体是**全程序共用**的，实现搬到了 ``pet/uitheme.py``
+#: （桌宠自己也要开对话框和面板，放在 game 里会逼出 pet → game 的循环依赖）。
+#: 这里转出来是为了两个游戏的 import 一行都不用改。
+from pet.uitheme import FONT_STACK, ui_font            # noqa: F401
 
 # ---------------------------------------------------------------- 版面
 
@@ -26,10 +31,6 @@ W, H = 780, 580                  # 游戏窗口尺寸（两个游戏一致，切
 HUD_H = 56                       # 顶部信息条高度
 GROUND_H = 46                    # 地面厚度
 GROUND_Y = H - GROUND_H          # 地面上表面
-
-#: 中文字体回退链。不同 Windows 上装的中文字体不一样，写死一个名字很容易翻车。
-FONT_STACK = ["Microsoft YaHei UI", "Microsoft YaHei", "SimHei",
-              "Noto Sans CJK SC", "Source Han Sans SC", "sans-serif"]
 
 OVERLAY_QSS = (
     "#overlay { background: rgba(255,255,255,238);"
@@ -64,21 +65,18 @@ def coins_for(score: int) -> int:
     **两个游戏必须用同一把尺子**，所以折算只写在这里一份。各写一份迟早会
     出现"打弹跳得分更划算"，而玩家一定会发现，然后只玩那个 —— 那另一个
     游戏就白做了。负数与脏数据按 0 处理，结算路径不该因为一个分数崩掉。
+
+    ⚠️ **有一处刻意的例外**：``game/g2048.py`` 的 ``coins_for_tile``。
+    那一款按**最大格子**折算而不是按分数 —— 因为它的分数会到几千，
+    套这里的 ``// 10`` 就是一局几百金币，小卖部当场失去意义。
+    改这个常数的时候记得那是**两处**（这里和那边），
+    只改一边的后果是"打 2048 比打另外三款划算得多"，
+    而玩家一定会发现最划算的那一款。
     """
     try:
         return max(0, int(score)) // COIN_PER_SCORE
     except (TypeError, ValueError):
         return 0
-
-
-def ui_font(size: int, bold: bool = False) -> QFont:
-    """按回退链挑字体的 QFont。给字号就行，别管系统里装的哪一款。"""
-    f = QFont()
-    f.setFamilies(FONT_STACK)
-    f.setPointSize(size)
-    if bold:
-        f.setWeight(QFont.Weight.Bold)
-    return f
 
 
 def build_result_overlay(host: QWidget, on_again, on_close):
@@ -139,6 +137,76 @@ def paint_hud_bar(p, w: int = W) -> None:
     p.drawRect(0, 0, w, HUD_H)
     p.setPen(QPen(QColor(226, 232, 240), 1))
     p.drawLine(0, HUD_H - 1, w, HUD_H - 1)
+
+
+# ---------------------------------------------------------------- HUD 排版
+#
+# 自绘 HUD（``QPainter.drawText``）没有布局管理器兜底 —— **坐标写错就是直接叠着印**。
+# 真事：弹跳得分的第一版把「最高 385」和「第 2 轮 · 剩 17 块」两段画进了同一段像素
+# （360~436 完全重合），当时所有逻辑断言全绿，是把验收图放大到 1:1 才看出来的。
+#
+# 修法是每个游戏各写两张表（``段名 -> (槽位起点, 槽位宽)`` 与 ``段名 -> 最宽内容占多少像素``），
+# 绘制函数一行坐标都不许写死；而**算区间**这件事两个游戏是同一套算术，
+# 所以放这里一份，各自只提供自己的表（``minigame.hud_zone_rect`` 就是这么用的）。
+
+
+def zone_spans(zones: dict[str, tuple[int, int]],
+               widest_px: dict[str, int],
+               right_aligned: tuple[str, ...] = ()) -> dict[str, tuple[int, int]]:
+    """把 ``段名 -> (槽位起点, 槽位宽)`` 算成 ``段名 -> (墨迹左, 墨迹右)``。
+
+    ``right_aligned`` 里的段按右对齐算：槽位右边缘就是墨迹右边缘，
+    墨迹从 ``起点 + 宽 - 实际宽`` 开始。之所以要区分，是因为数字位数会变
+    （"剩 18 块" → "剩 9 块"），右对齐能让变化发生在左边，不把隔壁元素推来推去。
+
+    **纯算术，不查字体** —— 于是在任何平台上都给出同一个答案，可以放心拿去
+    断言"两段有没有叠在一起"。它也是 ``offline`` 安全的：offscreen 平台插件
+    在本机字体库为空，``QFontMetrics`` 量出来是方框的宽度（约真值两倍），
+    拿它断言会**误报**叠字（实测误报 4 组）。
+    """
+    out: dict[str, tuple[int, int]] = {}
+    for name, (x, w) in zones.items():
+        tw = int(widest_px.get(name, w))
+        out[name] = (x + w - tw, x + w) if name in right_aligned else (x, x + tw)
+    return out
+
+
+def overlapping_zones(spans: dict[str, tuple[int, int]]) -> list[tuple[str, str]]:
+    """两两**相交**的段名对；返回空列表就是排版没重叠。
+
+    首尾刚好相接（``a1 == b0``）不算重叠：中间还留着 0 像素，肉眼看是分开的。
+    """
+    names = sorted(spans)
+    out: list[tuple[str, str]] = []
+    for i, a in enumerate(names):
+        a0, a1 = spans[a]
+        for b in names[i + 1:]:
+            b0, b1 = spans[b]
+            if a0 < b1 and b0 < a1:
+                out.append((a, b))
+    return out
+
+
+def measure_zone_widest(fonts: dict[str, tuple[int, bool]],
+                        widest: dict[str, str]) -> dict[str, int]:
+    """用**当前字体**量一组 HUD 段"最宽内容"占多少像素。
+
+    三个游戏各写一遍之后抽到这里 —— 它们做的是同一件事（遍历"最宽内容"、
+    按登记的字号造字体、量宽度），差别只有传进来哪两张表。
+
+    ⚠️ **必须在真实平台上调**：offscreen 平台插件在本机**字体库是空的**
+    （``QFontDatabase.families()`` 返回空列表），``QFontMetrics`` 量出来是
+    方框的宽度、约等于真值的两倍。冒烟测试跑的就是 offscreen，所以那边
+    只比 ``HUD_WIDEST_PX`` 这张登记表（纯算术）；真字体的复测放在验收脚本里
+    （``tools/verify_v21_ui.py`` / ``verify_v22_ui.py``），两者对照打印。
+    """
+    from PySide6.QtGui import QFontMetrics
+
+    out: dict[str, int] = {}
+    for name, text in widest.items():
+        size, bold = fonts[name]
+        out[name] = QFontMetrics(ui_font(size, bold=bold)).horizontalAdvance(text)
+    return out
 
 
 # ---------------------------------------------------------------- 窗口底座
@@ -334,6 +402,8 @@ _BG_CACHE: dict[str, QPixmap | None] = {}
 #: 这里只登记名字，具体渐变留在各自文件 —— 那是各游戏自己的美术。
 BG_BOUNCE = "bg_bounce"       # 弹跳得分（粉色舞台）
 BG_CATCH = "bg_catch"         # 接狗狗（蓝天草地）
+BG_RUNNER = "bg_runner"       # 跑一跑（黄昏跑道）
+BG_2048 = "bg_2048"           # 狗粮 2048（暖色桌面）
 
 
 def load_background(name: str) -> QPixmap | None:

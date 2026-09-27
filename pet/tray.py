@@ -79,6 +79,7 @@ class PetTray(QSystemTrayIcon):
         m.addSeparator()
         menulib.add_interactions(m, self.pet)
         menulib.add_shop(m, self.pet, self.cfg)
+        menulib.add_bag(m, self.pet, self.cfg)
         menulib.add_pomodoro(m, self.pet)
         # 没传游戏清单时退化成单个菜单项：点一下由主程序决定开哪个
         menulib.add_game_menu(m, self._games, self._on_game,
@@ -94,9 +95,17 @@ class PetTray(QSystemTrayIcon):
             act.triggered.connect(lambda _=False, s=scale: self._set_scale(s))
             size_menu.addAction(act)
 
+        m.addAction("背包面板", self.pet.open_panel)
         m.addAction("回到默认位置", self.pet.reset_position)
         m.addSeparator()
         m.addAction("退出", self._on_quit)
+
+        # 顺手把托盘的悬停提示也刷成"它现在怎么样" —— 不点开任何菜单、
+        # 鼠标往托盘图标上一停就能看到。v2.2.0 删掉"划过桌宠弹出的状态卡片"
+        # 之后，状态值就剩两个出口：这里，和右键菜单顶上那两行
+        # （见 ``pet/panel.py`` 开头的"状态显示的三次收缩"）。
+        self.setToolTip(f"桌宠　{self.pet.vitals.summary()}\n"
+                        f"{self.pet.vitals.detail()}　金币 {self.cfg.coins}")
 
     def sync_toggles(self) -> None:
         """只把勾选状态拉回 ``cfg`` 的真实值（菜单结构不动）。"""

@@ -10,7 +10,7 @@
 ;     --add-data "custom_pet/facing.json;assets/pet" --exclude-module tkinter main.py
 
 #define AppName "小狗桌宠"
-#define AppVer "2.0.0"
+#define AppVer "2.2.0"
 #define AppExe "DesktopPet.exe"
 #define AppPublisher "王蓬"
 
