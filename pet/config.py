@@ -21,10 +21,19 @@ from .vitals import START as VITALS_START
 #: 这两处要是各写一种格式，"离线多久"就会算出鬼来。
 STAMP_FMT = "%Y-%m-%d %H:%M:%S"
 
+#: 只到"天"的存档格式。「喂一口」那份每日免费额度用它 ——
+#: 记到秒没有意义，而且**同一天里两次调用必须相等**，否则额度永远重置不了。
+DAY_FMT = "%Y-%m-%d"
+
 
 def now_stamp() -> str:
     """当前时间的存档字符串形式。"""
     return datetime.now().strftime(STAMP_FMT)
+
+
+def today_stamp() -> str:
+    """今天的日期字符串。判断"是不是同一天"只认它的输出。"""
+    return datetime.now().strftime(DAY_FMT)
 
 
 def hours_since(stamp: str) -> float:
@@ -80,6 +89,10 @@ class Config:
     #: ``menu.SHOP`` 查 —— 商品改了价或改了描述，不用动存档，也不会出现
     #: "存档里写的是旧名字"。解析规则见 ``pet/bag.py`` 的 ``normalize``。
     inventory: dict[str, int] = field(default_factory=dict)
+    #: 上次用掉「喂一口」那份免费额度的**日期**（``DAY_FMT`` 的格式）。
+    #: 空 = 从没用过（老存档就是这个值，于是升级后还能白喂一次）。
+    #: 当天再点「喂一口」，吃的就是背包里的东西了。
+    free_feed_day: str = ""
     #: 上次在滚轮里选的番茄钟时长（**秒**）。下次打开对话框就从这儿接着滚，
     #: 不用每次重新滚一遍 25 分钟。默认值来自 ``pet/pomodoro.py`` 的常用档位。
     pomodoro_seconds: float = 1500.0

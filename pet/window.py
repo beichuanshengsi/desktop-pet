@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import random
 import time
+from dataclasses import dataclass
 
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QPainter, QPixmap
@@ -49,7 +50,7 @@ from .anim import Animator
 from .assets import AssetBank
 from .bag import Bag
 from .behavior import Brain, FPS, State
-from .config import Config, hours_since, now_stamp
+from .config import Config, hours_since, now_stamp, today_stamp
 from .panel import BagPanel
 from .paths import pet_asset_dir
 from .physics import (FLING_RESTITUTION, Motion, VelocitySampler, clamp_fling)
@@ -70,6 +71,20 @@ RING_HOP_SPEED = 520.0
 # 开头的"状态显示的三次收缩"里 —— 一句话：桌宠常驻桌面，鼠标划过它
 # 是最高频的意外动作，每次都弹一个窗口就不是"看得见"而是打扰了。
 # 要恢复的话别只把类加回来，先想清楚"多久弹一次算打扰"。
+
+
+@dataclass(frozen=True)
+class FeedPlan:
+    """点一下「喂一口」会发生什么。
+
+    ``PetWindow.feed()`` 和菜单那一行（``menu.feed_text``）读的都是它 ——
+    不共用一份计划的话，就会出现"菜单上写着今天免费、点下去却扣了肉干"
+    这类各说各话，而这两处恰好是用户唯一能看见"要不要花钱"的地方。
+    """
+
+    free: bool                              #: 走今天那份免费额度（不消耗东西）
+    item: menulib.ShopItem | None = None    #: 要消耗的商品（免费时为 ``None``）
+    left: int = 0                           #: 那样东西吃掉之后还剩几个
 
 
 class PetWindow(QWidget):
@@ -695,19 +710,68 @@ class PetWindow(QWidget):
         self.cfg.play_count += 1
         self.vitals.play()
 
+    def feed_plan(self) -> FeedPlan | None:
+        """这次「喂一口」会发生什么。返回 ``None`` = 喂不了。
+
+        两条路按"今天那份免费额度还在不在"分：
+
+        * **今天还没喂过** → 免费，不看背包（``free=True``）。
+          这一份是给"一个金币都没有"的时候兜底的，一天一次。
+        * **今天已经喂过** → 吃背包里第一样吃的（``free=False`` + ``item``）。
+          没有吃的就返回 ``None``，菜单那一行会跟着灰掉。
+
+        时间只认 ``config.today_stamp()``（本地日期）—— 跨天自动恢复，
+        不需要任何定时器：这个方法每次开菜单都现算一遍。
+        """
+        if self.cfg.free_feed_day != today_stamp():
+            return FeedPlan(free=True)
+
+        food = self.bag.first_food()
+        if food is None:
+            return None
+        item, n = food
+        return FeedPlan(free=False, item=item, left=n - 1)
+
     def feed(self) -> None:
-        """喂一口：记数 + 演吃饭那套动作（同样随机挑一套）+ 真的把它喂饱。
+        """喂一口：优先用今天那份免费额度，用完了就吃背包里的东西。
 
         这里**不**像逗它玩那样把窗口弹起来 —— 素材里狗是坐着低头吃饭的，
         整个窗口跟着蹦一下反而出戏，动作本身就够表达了。
+
+        **为什么要认识背包**：在这之前这里是白送的 —— 饱食 +26、冷却 0.35 秒，
+        从饿到饱只要一秒半、一个金币不花，于是小卖部就成了摆设。而饱食偏偏是
+        三条值里**唯一没有免费回补渠道的**（心情睡觉会回、精力只有睡觉能给），
+        这条后门一开，"买"这件事整个失去意义。
+
+        现在留了**每天一次**的免费额度：开局一个金币都没有时也能喂它一口，
+        想喂第二口就得先有吃的。
         """
+        plan = self.feed_plan()
+        if plan is None:
+            # 菜单上那一行是灰的，正常点不到这儿。但和 buy() 同一个道理：
+            # 菜单的判断只是提示，真正的判定必须在动作里，否则"菜单搭好到
+            # 点下去之间状态变了"就成了一条白拿数值的缝。
+            self.notify.emit("喂不了", "今天的免费用完了，背包里也没吃的")
+            return
         if not self._action_ready("feed"):
             return
+
+        if not plan.free and plan.item is not None:
+            # 有吃的就吃 —— 走和「背包」子菜单**完全相同**的那条路
+            # （扣一个、加那样东西自己的效果、演对应动作、发通知），
+            # 别在这里再写一遍那套顺序
+            self.use_item(plan.item.key)
+            return
+
+        self.cfg.free_feed_day = today_stamp()
+        self.cfg.feed_count += 1
+        self.vitals.feed()
+        self._save_vitals()
+        self.cfg.save()
         self._begin_action(State.FEED)
         self.brain.feed(seconds=self._oneshot_seconds(State.FEED))
         self._sync_anim(True)
-        self.cfg.feed_count += 1
-        self.vitals.feed()
+        self.notify.emit("喂饱了", "今天这份免费，下次得从背包里拿")
 
     def _action_ready(self, key: str) -> bool:
         """连点保护：太密就丢掉这次，免得动作被反复打断。

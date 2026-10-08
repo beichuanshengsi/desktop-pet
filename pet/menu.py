@@ -101,6 +101,15 @@ def shop_item(key: str) -> ShopItem | None:
     return None
 
 
+def is_food(item: ShopItem) -> bool:
+    """这是不是"吃的" —— **看它加不加饱食**。
+
+    「喂一口」只吃这些：饿的时候啃玩具球没有意义。所以"背包里明明有东西、
+    却全是玩具"的时候，那一行仍然要灰掉并说明原因。
+    """
+    return any(field == "satiety" for field, _ in item.gains)
+
+
 def gains_text(item: ShopItem) -> str:
     """商品/道具的效果说法，形如 ``饱食+35``。菜单和小卖部共用一份。"""
     return "/".join(f"{VITALS_LABEL.get(f, f)}+{v:.0f}" for f, v in item.gains)
@@ -129,10 +138,52 @@ class _ToggleTarget(Protocol):
     def set_topmost(self, on: bool) -> None: ...
 
 
+class _FeedPlan(Protocol):
+    """「喂一口」这一刻的计划，形状与 ``PetWindow.feed_plan()`` 的返回值一致。
+
+    同样是 Protocol 而不是反向 import ``window``（理由见 ``_ToggleTarget``）。
+
+    三项都写成 ``@property``（只读）而不是裸注解：对方 ``window.FeedPlan``
+    是个 frozen dataclass、属性只读，声明成可写的话 pyright 会判它不满足这个形状
+    （报 "free is not read-only in protocol"）。
+    """
+
+    @property
+    def free(self) -> bool: ...                 # 走的是今天那份免费额度
+    @property
+    def item(self) -> ShopItem | None: ...      # 要消耗的商品（免费时为 None）
+    @property
+    def left(self) -> int: ...                  # 那样东西吃掉之后还剩几个
+
+
+def feed_text(plan: _FeedPlan | None) -> str:
+    """「喂一口」那一行的文字。
+
+    ``plan`` 是 ``PetWindow.feed_plan()`` 的结果，``None`` 表示喂不了。
+    **文字必须把"这一下要花掉什么"说清楚** —— 要是"今天免费"和"吃掉肉干"
+    长得一模一样，用户就只能靠自己记住今天喂过没有。
+    """
+    if plan is None:
+        return "喂一口（今天的免费用完了，背包里也没吃的）"
+    if plan.free:
+        return "喂一口（今天免费）"
+    if plan.item is None:                  # 到不了：喂不了的话上面已经返回
+        return "喂一口"
+    return f"喂一口（吃掉{plan.item.label}，还剩 {plan.left}）"
+
+
 def add_interactions(menu: QMenu, pet) -> None:
-    """逗它玩 / 喂一口 —— 两个菜单都指到同一对方法上，别各接各的。"""
+    """逗它玩 / 喂一口 —— 两个菜单都指到同一对方法上，别各接各的。
+
+    「喂一口」的文字和能不能点是**当场按 ``pet.feed_plan()`` 算出来的**：
+    今天那份免费额度还在就写"今天免费"，用完了写"吃掉某某"，
+    背包里也没有吃的就灰掉并说明原因 —— 点了没反应，比直接说清楚更让人困惑。
+    """
     menu.addAction("逗它玩", pet.poke)
-    menu.addAction("喂一口", pet.feed)
+
+    plan = pet.feed_plan()
+    feed = menu.addAction(feed_text(plan), pet.feed)
+    feed.setEnabled(plan is not None)
 
 
 def add_vitals(menu: QMenu, vitals, cfg: Config) -> list[QAction]:

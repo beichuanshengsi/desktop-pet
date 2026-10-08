@@ -39,17 +39,18 @@ from pet.assets import DEFAULT_SET, AssetBank, default_set_files  # noqa: E402
 from pet.bag import Bag                                   # noqa: E402
 from pet.behavior import Brain, State                     # noqa: E402
 from pet.behavior import FPS as BFPS                      # noqa: E402
-from pet.config import Config
+from pet.config import Config, today_stamp
 from pet.paths import game_asset_dir, pet_asset_dir                     # noqa: E402
 from pet.physics import (FLING_MAX, FLING_MIN, Motion, VelocitySampler,  # noqa: E402
                          clamp_fling)
 from pet.pomodoro import (MAX_SECONDS, MIN_SECONDS, Pomodoro,  # noqa: E402
                           clamp_seconds, describe, format_clock)
-from pet.vitals import FEED_GAIN, OFFLINE_FLOOR, PLAY_GAIN, Vitals  # noqa: E402
+from pet.vitals import (FEED_GAIN, OFFLINE_FLOOR, PLAY_ENERGY_COST,  # noqa: E402
+                        PLAY_GAIN, Vitals)
 from pet.wheel import HOUR, MINUTE, SECOND, WheelModel     # noqa: E402
 from pet.wheel_dialog import DurationDialog                # noqa: E402
 from pet.panel import BagPanel                            # noqa: E402
-from pet.window import PetWindow                          # noqa: E402
+from pet.window import FeedPlan, PetWindow                # noqa: E402
 from game import COIN_PER_SCORE, GAMES, coins_for, create_game, game_kinds  # noqa: E402
 from game.catcher import (BONE_SCORE, BONE_SIZE, CATCHER_W, COMBO_BONUS,  # noqa: E402
                           COMBO_STEP, DRIFT_MAX, FALLER_KINDS, FALL_LIMIT,
@@ -313,6 +314,7 @@ def main() -> int:
           abs(pet.brain._duration - want) < 1e-6, f"{want:.2f}s")
 
     pet._last_action.clear()              # feed 有自己的冷却，这里只是别被打断
+    pet.cfg.free_feed_day = ""            # 请它用掉今天那份免费额度，别依赖执行顺序
     pet.feed()
     check("投喂后进入 FEED", pet.brain.state in (State.FEED, State.FALL),
           pet.brain.state.value)
@@ -1473,6 +1475,110 @@ def main() -> int:
           [i.key for i, _n in Bag({"feast": 1, "treat": 1}).entries()]
           == ["treat", "feast"],
           repr(Bag({"feast": 1, "treat": 1})))
+
+    # ---------------------------------------------------------- 喂一口的花销
+    section("喂一口：每天一次免费，之后吃背包里的")
+
+    treat_item = menulib.shop_item("treat")
+    feast_item = menulib.shop_item("feast")
+    ball_item = menulib.shop_item("ball")
+    check("「吃的」只认加饱食的商品（玩具球不算：饿的时候啃球没有意义）",
+          treat_item is not None and feast_item is not None and ball_item is not None
+          and menulib.is_food(treat_item) and menulib.is_food(feast_item)
+          and not menulib.is_food(ball_item))
+
+    mixed = Bag({"ball": 3, "treat": 1})
+    mixed_food = mixed.first_food()
+    check("背包里第一样吃的会跳过玩具（按商品清单顺序，不是按先买的哪样）",
+          mixed_food is not None and mixed_food[0].key == "treat", repr(mixed))
+    check("背包里全是玩具时查不到吃的（那一行就该灰掉）",
+          Bag({"ball": 3}).first_food() is None)
+
+    fcfg = Config()
+    fcfg.free_feed_day = ""                    # 今天还没喂过
+    fpet = PetWindow(fcfg, bank, GAMES)
+    fpet.brain.auto_walk = False
+    fpet.vitals.satiety = 40.0
+
+    free_plan = fpet.feed_plan()
+    check("今天还没喂过 → 免费，这时候不看背包",
+          free_plan is not None and free_plan.free, repr(free_plan))
+    check("菜单上如实写着「今天免费」",
+          "免费" in menulib.feed_text(free_plan), menulib.feed_text(free_plan))
+
+    fpet._last_action.clear()
+    fpet.feed()
+    check("那份免费真的补饱食，并把今天记下来（明天才再有一次）",
+          abs(fpet.vitals.satiety - (40.0 + FEED_GAIN)) < 1e-9
+          and fcfg.free_feed_day == today_stamp(),
+          f"{fpet.vitals.satiety:.1f} / {fcfg.free_feed_day}")
+
+    check("免费用完、背包又空着 → 算下来就是喂不了", fpet.feed_plan() is None)
+    check("喂不了时菜单写明原因（点了没反应，比直接说清楚更让人困惑）",
+          "没吃的" in menulib.feed_text(None)
+          and "免费" in menulib.feed_text(FeedPlan(free=True)),
+          f"{menulib.feed_text(None)} / {menulib.feed_text(FeedPlan(free=True))}")
+
+    before = fpet.vitals.satiety
+    fpet._last_action.clear()
+    fpet.feed()
+    check("空背包时再点喂一口，饱食一点不动（后门关上了）",
+          abs(fpet.vitals.satiety - before) < 1e-9, f"{fpet.vitals.satiety:.1f}")
+
+    fpet.bag.add("treat")
+    food_plan = fpet.feed_plan()
+    check("背包里有吃的 → 计划改成「吃掉肉干」，并预告吃掉之后还剩几个",
+          food_plan is not None and not food_plan.free
+          and food_plan.item is not None and food_plan.item.key == "treat"
+          and food_plan.left == 0,
+          repr(food_plan))
+    check("菜单上写清楚这一下要花掉什么",
+          "肉干" in menulib.feed_text(food_plan), menulib.feed_text(food_plan))
+
+    fpet.vitals.satiety = 30.0                 # 先降下来，别让 +35 撞上 100 的天花板
+    before = fpet.vitals.satiety
+    fpet._last_action.clear()
+    fpet.feed()
+    check("喂一口真的把那样东西吃了，加的是它自己的效果（肉干 +35 饱食）",
+          fpet.bag.count("treat") == 0
+          and abs(fpet.vitals.satiety - (before + 35.0)) < 1e-9,
+          f"{fpet.bag!r} / 饱食 {fpet.vitals.satiety:.1f}")
+
+    fpet.bag.add("ball")
+    check("背包里只剩玩具时照样喂不了（玩具不是饭）", fpet.feed_plan() is None)
+
+    fcfg.free_feed_day = "2000-01-01"          # 假装是很久以前
+    come_back = fpet.feed_plan()
+    check("跨到新的一天，免费额度自己回来了（不靠定时器，每次现算）",
+          come_back is not None and come_back.free, repr(come_back))
+
+    open_menu = fpet._build_menu()
+    feed_acts = [a for a in open_menu.actions() if a.text().startswith("喂一口")]
+    check("右键菜单里「喂一口」只有一项，文字是当场算出来的",
+          len(feed_acts) == 1 and "免费" in feed_acts[0].text(),
+          "/".join(a.text() for a in feed_acts))
+    check("能喂的时候那一项是可点的",
+          len(feed_acts) == 1 and feed_acts[0].isEnabled(),
+          "/".join(a.text() for a in feed_acts))
+
+    fcfg.free_feed_day = today_stamp()         # 免费用掉了，背包里只剩玩具球
+    shut_menu = fpet._build_menu()
+    shut = [a for a in shut_menu.actions() if a.text().startswith("喂一口")]
+    check("免费用完、背包里又只有玩具 → 那一项灰掉并说明原因",
+          len(shut) == 1 and not shut[0].isEnabled() and "没吃的" in shut[0].text(),
+          "/".join(a.text() for a in shut))
+
+    fpet._timer.stop()
+    fpet._save_timer.stop()
+
+    check("逗它玩降到 +8，精力仍然花掉 3.3"
+          "（玩一次的体力消耗是动作属性，不跟收益一起缩）",
+          PLAY_GAIN == 8.0 and abs(PLAY_ENERGY_COST - 3.3) < 1e-9,
+          f"心情+{PLAY_GAIN:.0f} / 精力-{PLAY_ENERGY_COST:.1f}")
+    ball_mood = dict(ball_item.gains)["mood"] if ball_item else 0.0
+    check("免费陪伴的收益明显低于花钱的玩具（否则买球很傻）",
+          ball_mood > 0 and PLAY_GAIN < ball_mood,
+          f"逗它玩+{PLAY_GAIN:.0f} vs 玩具球+{ball_mood:.0f}")
 
     # ---------------------------------------------------------- 番茄钟时长
     section("番茄钟时长：范围、读数与说法")

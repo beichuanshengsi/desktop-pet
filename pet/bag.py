@@ -25,7 +25,7 @@
 
 from __future__ import annotations
 
-from .menu import SHOP, ShopItem, shop_item
+from .menu import SHOP, ShopItem, is_food, shop_item
 
 
 def normalize(raw) -> dict[str, int]:
@@ -110,6 +110,21 @@ class Bag:
             if n > 0:
                 out.append((item, n))
         return out
+
+    def first_food(self) -> tuple[ShopItem, int] | None:
+        """背包里第一样"吃的"，没有就返回 ``None``。
+
+        「喂一口」用它：免费额度用完之后，吃掉的正是这里查出来的那一样。
+        按 ``SHOP`` 顺序而不是"先买的先吃" —— 同 ``entries()`` 的理由，
+        同一只狗每次喂到的必须是同一样东西。
+
+        **只认加饱食的商品**：背包里全是玩具球时它返回 ``None`` ——
+        饿的时候啃球没有意义，那时候该灰掉的是「喂一口」那一行。
+        """
+        for item, n in self.entries():
+            if is_food(item):
+                return item, n
+        return None
 
     # ------------------------------------------------------------ 存档
 
