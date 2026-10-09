@@ -621,13 +621,17 @@ class CatchGame(GameWindow):
         self.catcher.teleport((W - CATCHER_W) / 2, GROUND_Y - CATCHER_H)
         self.catcher.on_ground = True
 
-    def _finish(self) -> None:
-        self.over = True
+    def _record_best(self) -> None:
         if self.score > self.cfg.best_catch:
             self.cfg.best_catch = self.score
             self.cfg.save()
+
+    def _finish(self, early: bool = False) -> None:
+        self.over = True
+        self._record_best()
         earned = self._award_coins()
-        self.label_title.setText(f"血量耗尽！本局得分 {self.score}")
+        headline = "提前收工" if early else "血量耗尽！"
+        self.label_title.setText(f"{headline}本局得分 {self.score}")
         self.label_sub.setText(
             f"最高分 {self.cfg.best_catch}    接住 {self.caught} 只    "
             f"最长连击 {self.best_combo}    撑过 {self.survived:.0f} 秒    "
@@ -830,10 +834,12 @@ class CatchGame(GameWindow):
             self.target_x = None
             return
         if key == Qt.Key.Key_R:
-            self._restart()
+            # 走 request_restart 而不是直接 _restart：这一局没打完的话
+            # 要先弹确认框，否则按一下 R 分数就没了、连个提示都没有
+            self.request_restart()
             return
         if key == Qt.Key.Key_Escape:
-            self.close()
+            self.request_close()
             return
         super().keyPressEvent(event)
 

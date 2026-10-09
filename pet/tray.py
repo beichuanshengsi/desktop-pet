@@ -84,6 +84,12 @@ class PetTray(QSystemTrayIcon):
         # 没传游戏清单时退化成单个菜单项：点一下由主程序决定开哪个
         menulib.add_game_menu(m, self._games, self._on_game,
                               fallback=lambda: self._on_game())
+        # 有一局被"暂停，回头再玩"收着 —— 托盘这边也挂一条（右键菜单那边
+        # 由 ``PetWindow._build_menu`` 挂）。两处都挂是有意的：玩家按了暂停
+        # 之后回桌面的第一反应可能是去点托盘图标。
+        if self.pet.suspended_game:
+            m.addAction(f"▶ 继续上一局（{self.pet.suspended_game}）",
+                        self.pet.request_resume.emit)
         m.addSeparator()
 
         self._toggles = menulib.add_toggles(m, self.cfg, self.pet)

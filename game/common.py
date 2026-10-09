@@ -124,6 +124,56 @@ def build_result_overlay(host: QWidget, on_again, on_close):
     return overlay, title, sub
 
 
+def build_confirm_overlay(host: QWidget, on_cancel, on_pause, on_settle):
+    """造「这一局还没打完」的确认浮层，返回 ``(浮层, 标题标签, 副标题标签)``。
+
+    三个出口：**按当前分数结算** / **暂停，回头再玩** / **取消，继续玩**。
+    顺序是有意的 —— 结算排最前（主按钮，蓝底），"取消"垫底，跟系统对话框
+    把"安全出口"放在最后的习惯一致；把"取消"放第一位会让人误点。
+
+    为什么用自定义浮层而不是 ``QMessageBox``：
+    1. 样式要和结算浮层一致（同一套 ``OVERLAY_QSS``），弹个系统灰框很出戏；
+    2. ``QMessageBox`` 是模态对话框，``exec()`` 会阻塞事件循环 —— 冒烟测试
+       没法断言"点了取消之后这一局还在不在"。
+    """
+    overlay = QWidget(host)
+    overlay.setObjectName("overlay")
+    overlay.setStyleSheet(OVERLAY_QSS)
+    overlay.setFixedWidth(352)
+
+    lay = QVBoxLayout(overlay)
+    lay.setContentsMargins(28, 24, 28, 24)
+    lay.setSpacing(10)
+
+    title = QLabel("这一局还没打完", overlay)
+    title.setFont(ui_font(14, bold=True))
+    title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    sub = QLabel("", overlay)
+    sub.setFont(ui_font(11))
+    sub.setStyleSheet("color:#6b7688;")
+    sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    sub.setWordWrap(True)
+
+    def _button(text: str, slot, *, secondary: bool) -> QPushButton:
+        btn = QPushButton(text, overlay)
+        # NoFocus：游戏靠键盘玩，按钮抢走焦点会让"取消继续玩"之后按键失灵
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        if secondary:
+            btn.setStyleSheet(OVERLAY_SECONDARY_QSS)
+        btn.clicked.connect(slot)
+        return btn
+
+    lay.addWidget(title)
+    lay.addWidget(sub)
+    lay.addSpacing(4)
+    lay.addWidget(_button("按当前分数结算", on_settle, secondary=False))
+    lay.addWidget(_button("暂停，回头再玩", on_pause, secondary=True))
+    lay.addWidget(_button("取消，继续玩", on_cancel, secondary=True))
+    overlay.hide()
+    return overlay, title, sub
+
+
 def center_overlay(overlay: QWidget, w: int = W, h: int = H) -> None:
     """把浮层摆在 HUD 以下那块区域的中间。"""
     overlay.adjustSize()
@@ -231,20 +281,33 @@ class GameWindow(QWidget):
     * 窗口尺寸 / 标题 / 强焦点策略（换游戏时窗口不跳、键盘能直接用）
     * 16ms 精确计时器（一局的真实时长按 wall-clock 算，掉帧只让动作粗一点）
     * 结算浮层的创建、居中、显示
+    * **中途退出的确认框**（结算 / 暂停 / 取消）与**暂停-恢复**（``suspend`` /
+      ``resume``），见 ``ask_exit``
     * 松键清键位、关闭时把本局得分 ``closed.emit()`` 出去
 
-    子类只需要做三件事：
+    子类只需要做四件事：
 
     1. 设 ``TITLE`` / ``OVERLAY_TITLE`` 两个类属性；
     2. ``__init__`` 里先 ``super().__init__(bank, cfg, parent)`` 再建自己的场景
        （别忘 ``self.over = False`` 与 ``self.score = 0`` 底座已经给过了），
        最后调 ``self.start_clock()``；
-    3. 实现 ``_step(dt)`` 与 ``_reset_scene()``，需要时再覆盖
-       ``_countdown`` / ``_settle`` / ``_decay`` 这几个钩子。
+    3. 实现 ``_step(dt)`` / ``_reset_scene()`` / ``_finish(early)`` 三个必填钩子，
+       需要时再覆盖 ``_countdown`` / ``_settle`` / ``_decay`` / ``_record_best``
+       / ``_round_coins``；
+    4. 把 ``Esc`` 与「重开」都接到 ``self.ask_exit()``（别直接 ``close()``）。
+
+    **"记最高分"与"算金币"抽成 ``_record_best`` / ``_round_coins`` 两个钩子**，
+    是因为它们各有两个调用方：打完结算（``_finish``）和中途退出结算
+    （``_settle_early``）。各写一份的话，"中途退出不记最高分"这种漏改一定会出现。
     """
 
     #: 一局结束时发出，参数是本局得分。``main.py`` 靠它恢复桌宠的桌面漫步。
     closed = Signal(int)
+
+    #: 这一局被「暂停，回头再玩」收起来了（窗口已隐藏但状态还在）。
+    #: ``main.py`` 收到后恢复桌宠走动，并在右键菜单里挂「继续上一局」。
+    #: **和 ``closed`` 是两回事**：那个是"这局没了"，这个是"这局先放一放"。
+    suspended = Signal()
 
     TITLE = "桌宠小游戏"
     OVERLAY_TITLE = "游戏结束"
@@ -265,8 +328,18 @@ class GameWindow(QWidget):
         #: 本局结算时用到的装备加成比例（0.13 = +13%）。给结算浮层那句
         #: "（含装备 +13%）"用 —— 不加这一行，用户根本看不出装备起没起作用。
         self._bonus_rate = 0.0
+        #: 这一局被「暂停，回头再玩」收着（见 ``suspend``）。
+        self._suspended = False
+        #: 程序自己拆窗口用的开关：置上之后 ``closeEvent`` 不再拦（见 ``close_now``）。
+        self._force_close = False
+        #: 这一局是"玩家中途收工、按当时分数结算"的（不是时间到/撞死）。
+        self._settled_early = False
+        #: 本局实发金币（含装备加成）。``_award_coins`` 写它，``close_settling``
+        #: 读它 —— 外面（``main.py``）要靠这个数决定要不要弹一句"帮你结算了"。
+        self._last_earned = 0
 
         self._build_overlay()
+        self._build_confirm()
 
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -338,6 +411,38 @@ class GameWindow(QWidget):
         """每帧都要走的衰减与粒子清理。子类加自己的，记得调 ``super()``。"""
         self.pops = [p for p in self.pops if p.update(dt)]
 
+    def _record_best(self) -> None:
+        """把本局成绩并进存档里的最高分。**默认什么都不记**，四个游戏各覆盖。
+
+        各游戏记的字段不同（``best_score`` / ``best_catch`` / ``best_runner`` /
+        ``best_2048``），但"只有超过才写、写就立刻 ``save()``"这条规矩一样。
+        抽成钩子是为了让 ``_finish()``（打完）与 ``_settle_early()``（中途退出）
+        **共用同一份记录逻辑** —— 这个功能要修的正是"中途退出什么都不记"，
+        所以这两条路必须走同一个实现，不能各写一份。
+        """
+
+    def _round_coins(self) -> int:
+        """本局该给的**基础**金币（还没乘装备加成）。默认按分数折算。
+
+        ``g2048`` 覆盖它：那一款按**最大格子**折算（``coins_for_tile``），
+        不跟 ``coins_for`` 这把尺子（理由写在 ``g2048.py`` 模块开头）。
+        抽成钩子之后，"中途退出结算"也会自动走对同一个算法 ——
+        否则会出现"打完按格子算、中途退按分数算"这种两把尺子的事故。
+        """
+        return coins_for(self.score)
+
+    def _finish(self, early: bool = False) -> None:
+        """结算这一局。**子类必须实现**（四个游戏的结算文案各不相同）。
+
+        ``early=True`` 表示"玩家中途按当前分数收工"，不是时间到 / 撞死 ——
+        文案要跟着变（"提前收工"而不是"时间到"），否则玩家会以为是自己输了。
+
+        ⚠️ **参数名必须与这里一致**：子类改叫 ``stop`` 之类类型检查器会判为
+        "不兼容的覆盖"（Python 允许按关键字传参，改名字就是改签名）。
+        底座只调 ``_finish(early=True)`` 这一种，所以参数要给默认值。
+        """
+        raise NotImplementedError
+
     def _reset_scene(self, first: bool = False) -> None:
         """把一局重置回开局。子类必须实现，``_restart()`` 会调它。
 
@@ -353,22 +458,30 @@ class GameWindow(QWidget):
             self, self._restart, self.close)
         self.label_title.setText(self.OVERLAY_TITLE)
 
+    def _build_confirm(self) -> None:
+        self.confirm, self.confirm_title, self.confirm_sub = build_confirm_overlay(
+            self, self._cancel_exit, self._suspend_round, self._settle_early)
+        self.confirm_sub.setText(
+            "直接退出的话，这一局打的分数就白打了。\n"
+            "可以按现在的分数结算拿金币，也可以先暂停、回头再从右键菜单接着玩。")
+
     def _award_coins(self) -> int:
-        """把本局得分折成金币记进存档，返回这一局挣了多少（**含装备加成**）。
+        """把本局该得的金币记进存档，返回这一局挣了多少（**含装备加成**）。
 
-        放底座里、由 ``_finish()`` 调，而不是各游戏各写一遍：汇率只有一个
-        （``coins_for``），两个游戏必须用同一把尺子。
+        放底座里、由 ``_finish()`` 与 ``_settle_early()`` 调，而不是各游戏各写
+        一遍：汇率只有一个（``coins_for``），四个游戏必须用同一把尺子。
 
-        **只在结算时给**，中途关掉窗口不给 —— 否则"打到一半看要输了就关窗"
-        会变成一种比认真打完更划算的操作。
+        **基础金币走 ``_round_coins()`` 这个钩子**（默认按分数折算，2048 覆盖成
+        按最大格子折算）—— 这样"打完结算"和"中途退出结算"自动用同一个算法。
 
         装备加成在这里乘上去（``coins_with_bonus``），而不是去改 ``coins_for``：
         汇率是"分 → 金币"的换算，加成是"玩家资产带来的额外收益"。两件事混在
         一起的话，"卸下装备之后汇率是多少"就说不清了，而且
         ``coins_for`` 是个纯函数，被测试和 HUD 到处引用。
         """
-        base = coins_for(self.score)
+        base = self._round_coins()
         earned, self._bonus_rate = coins_with_bonus(self.cfg, base)
+        self._last_earned = earned
         if earned:
             self.cfg.coins += earned
             self.cfg.save()
@@ -391,8 +504,173 @@ class GameWindow(QWidget):
         """「再来一局」。先藏浮层再重置，避免重置过程中浮层闪一下。"""
         self.overlay.hide()
         self.over = False
+        # 「这一局是中途收工的」和「这一局发了多少金币」都是**属于一局**的标记，
+        # 重开就是新的一局 —— 不清的话，新一局会顶着"上一局是中途收工的"这个
+        # 身份继续跑（``settled_early`` 就再也回不到 False 了）。
+        self._settled_early = False
+        self._last_earned = 0
         self._reset_scene(first=True)
         self.setFocus()
+
+    # ------------------------------------------------------------ 中途退出
+    #
+    # 这一节修的是一个具体的坑：以前按 Esc / 点关闭按钮 / 按 R 重开，只要这一局
+    # 还没打完，分数和金币就**全部丢掉**（``_finish()`` 只在时间到 / 撞死时才跑）。
+    # 玩家玩了半局、临时有急事，回来一看白玩 —— 这不合理。
+    #
+    # 现在的规矩：**中途要走，先问一句**，三个出口 ——
+    #   按当前分数结算（``_settle_early``）/ 暂停回头再玩（``suspend``）/ 取消继续玩。
+    #
+    # 为什么不担心"看要输了就中途结算更划算"：四个游戏的分数**只增不减**，
+    # 金币又只跟当前分数（2048 跟最大格子）挂钩 —— 中途结算拿到的**只会比打完少**。
+    # 弹跳得分 / 跑一跑越到后面单位时间收益越高，2048 提前退更是纯亏。
+
+    @property
+    def is_suspended(self) -> bool:
+        """这一局是不是被「暂停，回头再玩」收起来了。"""
+        return self._suspended
+
+    @property
+    def settled_early(self) -> bool:
+        """这一局是不是"中途收工、按当时分数结算"的。"""
+        return self._settled_early
+
+    @property
+    def last_earned(self) -> int:
+        """本局实发金币（含装备加成）。没结算过就是 0。"""
+        return self._last_earned
+
+    def request_close(self) -> None:
+        """``Esc`` / 点关闭按钮时的统一入口。
+
+        打完了就直接关（这时正看着结算浮层，关掉是玩家本意）；
+        没打完就先弹确认框，别让这一局白丢。
+
+        四个游戏都从这里走，**不要在自己文件里直接 ``self.close()``** ——
+        那样会把确认框整个绕过去。
+        """
+        if self.over:
+            self.close()
+        else:
+            self.ask_exit()
+
+    def request_restart(self) -> None:
+        """``R`` 重开的统一入口。
+
+        打完时直接重开；**没打完时要先问一句** —— 这条最容易漏：
+        ``R`` 按下去没有任何提示，玩家不会意识到这一局的分数已经没了。
+        """
+        if self.over:
+            self._restart()
+        else:
+            self.ask_exit()
+
+    def ask_exit(self) -> None:
+        """要退出 / 重开，但这一局还没打完 —— 先弹确认框问一句。
+
+        ``Esc`` 和「重开」都接到这里，**不要再直接调 ``close()``**：
+        直接关就是玩家白丢一局，而重开更隐蔽（按下去什么都没提示、分数就没了）。
+
+        三种情况直接放行、不弹框：
+
+        * 这一局已经结算过（``self.over``，正看着结算浮层）—— 关掉就完了；
+        * 已经在暂停态（窗口本来就藏着，也点不到）；
+        * 确认框已经开着（连按两下 ``Esc`` 不该叠出两层浮层）。
+        """
+        if self.over or self._suspended or self.confirm.isVisible():
+            return
+        self.confirm.show()
+        self.confirm.raise_()
+        center_overlay(self.confirm, W, H)
+
+    def _cancel_exit(self) -> None:
+        """「取消，继续玩」：收起确认框，这一局一个字节都没动。"""
+        self.confirm.hide()
+        self.setFocus()
+
+    def _settle_early(self) -> None:
+        """「按当前分数结算」：把这一局按现在的进度结掉。
+
+        走的是和打完完全一样的 ``_finish()``，只是带 ``early=True`` 换个文案 ——
+        于是"记最高分 / 给金币 / 弹结算浮层"三件事自动和正常结算一模一样。
+
+        浮层照样弹（玩家能从上面看到拿了多少金币，也能直接「再来一局」），
+        这跟"点 Esc 就直接消失"是两件事：**退出的是这一局，不是这个窗口**。
+        """
+        if self.over:
+            return
+        self.confirm.hide()
+        self._settled_early = True
+        self._finish(early=True)
+
+    def _suspend_round(self) -> None:
+        """「暂停，回头再玩」：收起确认框，然后冻结这一局。"""
+        self.suspend()
+
+    def suspend(self) -> None:
+        """冻结这一局但不结束：停表 + 藏窗口，**状态一个都不丢**。
+
+        ⚠️ 这里**绝不能走 ``close()``**：那会触发 ``closed``，``main.py`` 收到
+        就把窗口 ``deleteLater()`` 掉了 —— 那就真没了，跟直接退出没区别。
+        所以只 ``hide()``，窗口对象留着，``resume()`` 一叫就接着打。
+
+        发 ``suspended`` 而不是 ``closed``：外面要做的事也不一样 ——
+        ``closed`` 是"解除暂停 + 拆窗口"，``suspended`` 是"恢复桌宠走动 +
+        在菜单里挂一个继续入口"，窗口得留着。
+
+        **已经是暂停态就直接返回**：``main.py`` 收到信号会去 ``pet`` 上挂菜单、
+        ``tray.refresh()``，重复发一遍是白干；而"关掉桌宠再打开"这类操作也可能
+        让同一条路径走到两次。
+        """
+        if self._suspended:
+            return
+        self.confirm.hide()
+        self._timer.stop()
+        self._suspended = True
+        self.hide()
+        self.suspended.emit()
+
+    def resume(self) -> None:
+        """从暂停态接着打。不是暂停态则什么都不做（重复点菜单入口不该有副作用）。"""
+        if not self._suspended:
+            return
+        self._suspended = False
+        # 暂停期间可能过了十几分钟，_last 还停在那一刻 —— 不重置的话
+        # 恢复的第一帧会算出巨大 dt，物体直接瞬移出界（``_tick`` 虽然夹到
+        # 0.05 秒，但那是给掉帧用的，不该拿来兜这种"暂停了几分钟"的情况）。
+        self._last = perf_counter()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+        self._timer.start(16)
+
+    def close_now(self) -> None:
+        """不管打没打完，立刻关掉（程序自己拆窗口时用）。
+
+        正常关窗会被 ``closeEvent`` 拦下来弹确认框；换游戏、退出程序时弹那个框
+        是纯打扰 —— 所以给外面一条"我确定要关"的路。
+        """
+        self._force_close = True
+        self.close()
+
+    def close_settling(self) -> int:
+        """收窗口之前，把还没打完的这一局按当前进度结掉。返回这一局挣的金币。
+
+        给"换一个游戏"和"退出程序"用：那一局是玩家**明确要求要留着**的
+        （他选的是暂停，不是结算），直接 ``deleteLater()`` 会把进度抹掉 ——
+        那正是这个功能要修的毛病。既然他改主意去玩别的了，就把这一局按现在的
+        分数结掉（金币会进存档，``main.py`` 顺手弹个托盘气泡告诉他），
+        而不是悄悄扔掉。
+
+        结算浮层虽然会 ``show()``，但窗口本身是藏着的（暂停态），玩家看不见 ——
+        所以这里不需要为"闪一下"做什么特殊处理。
+        """
+        if not self.over:
+            self._settled_early = True
+            self._finish(early=True)
+        self.close_now()
+        return self.last_earned
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -405,6 +683,13 @@ class GameWindow(QWidget):
         self._last = perf_counter()
 
     def closeEvent(self, event) -> None:
+        # 还没打完就来关窗 —— 先问一句，别让玩家白丢一局。
+        # 三种情况不拦：已经结算过（over）、程序自己在拆窗口（_force_close）、
+        # 暂停态（窗口本来就藏着，走到这儿多半是 main.py 在换游戏）。
+        if not self.over and not self._force_close and not self._suspended:
+            event.ignore()
+            self.ask_exit()
+            return
         self._timer.stop()
         self.closed.emit(self.score)       # main.py 收到后解除桌宠的暂停
         super().closeEvent(event)

@@ -128,6 +128,11 @@ class PetWindow(QWidget):
     #: 不装钩子**。遮罩要盖住所有显示器、还要把游戏/卡册抬到它上面，那些事
     #: 窗口这一层根本看不见（它连自己之外有哪几个窗口都不知道）。
     request_kids = Signal(str)
+    #: 「继续上一局」—— 玩家点了菜单里那条"暂停中就挂出来"的入口。
+    #:
+    #: 不带参数：暂停的那一局只可能有一个（``main.py`` 手里只有一个游戏窗口
+    #: 变量），谁在暂停主程序自己清楚，窗口不需要知道游戏标识。
+    request_resume = Signal()
 
     def __init__(self, cfg: Config, bank: AssetBank, games=(), parent=None):
         super().__init__(parent)
@@ -144,6 +149,11 @@ class PetWindow(QWidget):
         #: 注意这是**白名单式**的（锁着时只加"玩桌宠"那几块），不是黑名单：
         #: 以后新加一个菜单项，默认不会漏进幼儿模式里。
         self.kids_locked = False
+        #: 有一个游戏被「暂停，回头再玩」收着时，这里是它**菜单里显示的名字**
+        #: （比如"跑一跑"）；没有就是 ``None``。由 ``main.py`` 在两个时机设置：
+        #: 游戏发 ``suspended`` 时设上（菜单里挂出「继续上一局」），
+        #: 恢复/关闭时清掉。存名字而不是标识，是因为菜单要直接显示它。
+        self.suspended_game = None
 
         self.setWindowTitle("桌宠")
         self._apply_window_flags()
@@ -983,6 +993,14 @@ class PetWindow(QWidget):
         menulib.add_bag(menu, self, self.cfg)
         menulib.add_pomodoro(menu, self)
         menulib.add_game_menu(menu, self._games, self.request_game.emit)
+        # 有一局被"暂停，回头再玩"收着 —— 挂一条显眼的续玩入口。
+        # 放在游戏子菜单**外面**（平级）：藏在二级菜单里等于没挂，
+        # 玩家按了暂停、过了十分钟回来，根本不记得要去哪儿找。
+        # 也放在幼儿模式的提前 return **之前**：小朋友自己按了暂停，
+        # 得能自己接回去。
+        if self.suspended_game:
+            menu.addAction(f"▶ 继续上一局（{self.suspended_game}）",
+                           self.request_resume.emit)
 
         if self.kids_locked:
             # 幼儿模式开着。上面那几块全是"玩桌宠"，留着；下面那些一律不给 ——
@@ -1045,6 +1063,26 @@ class PetWindow(QWidget):
         self._paused = bool(paused)
         if paused:
             self.body.stop()
+
+    def set_suspended_game(self, kind: str | None) -> None:
+        """告诉右键菜单"有没有一局被暂停收着"，有的话挂出「继续上一局」。
+
+        ``kind`` 是**游戏标识**（``game.GAMES`` 的第一个元素），这里翻成菜单
+        显示的名字。``None`` 表示没有暂停中的一局。
+
+        标识翻名字放在这一层、而不是让 ``main.py`` 翻好了传字符串进来：
+        菜单要显示的是"跑一跑"这种名字，而 ``pet`` 这一层手里正好有
+        ``self._games``（``main.py`` 建窗口时就传进来了）—— 让主程序为了
+        一个菜单标签去查表，等于把"菜单显示什么"的知识漏到主程序里。
+        """
+        label = None
+        if kind:
+            for gid, name, _title in self._games:
+                if gid == kind:
+                    label = name
+                    break
+            label = label or kind          # 清单里没有也别显示成空白
+        self.suspended_game = label
 
     def apply_scale(self, scale: float) -> None:
         self.cfg.scale = max(0.5, min(2.0, float(scale)))

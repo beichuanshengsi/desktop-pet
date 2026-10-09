@@ -43,9 +43,9 @@ from PySide6.QtGui import QColor, QFontMetricsF, QPainter, QPen
 from game.common import (BG_2048, HUD_H, W, H, GameWindow, load_background,
                          measure_zone_widest, paint_hud_bar, ui_font, zone_spans)
 from pet.assets import AssetBank
-#: 装备加成。这一款**不跟 ``coins_for`` 那把尺子**（自己按最大格折算），
-#: 但加成必须跟另外三款共用同一个函数 —— 否则会出现"打 2048 吃不到装备加成"。
-from pet.cards import coins_with_bonus
+# 装备加成的乘法与"金币进存档"现在都在底座 ``_award_coins`` 里一份
+# （本款只覆盖 ``_round_coins`` 提供自己那把尺子），所以这里不再直接 import
+# ``coins_with_bonus`` —— 留着会让"加成只写一处"这个约定变得看不出来。
 
 # ================================================================ 规则（纯函数）
 #
@@ -394,10 +394,12 @@ class Game2048(GameWindow):
             self.undo()
             return
         if key == Qt.Key.Key_R:
-            self._restart()
+            # 走 request_restart 而不是直接 _restart：这一局没打完的话
+            # 要先弹确认框，否则按一下 R 分数就没了、连个提示都没有
+            self.request_restart()
             return
         if key == Qt.Key.Key_Escape:
-            self.close()
+            self.request_close()
             return
         super().keyPressEvent(event)
 
@@ -427,22 +429,36 @@ class Game2048(GameWindow):
         if self._flash > 0:
             self._flash = max(0.0, self._flash - dt * 1.6)
 
-    def _finish(self) -> None:
-        self.over = True
-        best = max(self.cfg.best_2048, self.score)
+    def _record_best(self) -> None:
         if self.score > self.cfg.best_2048:
             self.cfg.best_2048 = self.score
             self.cfg.save()
-        earned, self._bonus_rate = coins_with_bonus(
-            self.cfg, coins_for_tile(max_tile(self.grid)))
-        if earned:
-            self.cfg.coins += earned
-            self.cfg.save()
+
+    def _round_coins(self) -> int:
+        """2048 的金币**按最大格子**折算，不跟 ``coins_for`` 那把尺子。
+
+        覆盖这一个钩子就够了：``_award_coins``（以及它背后的"打完结算"和
+        "中途退出结算"两条路）都会自动走这里，不用各写一遍。
+        理由见模块开头第 2 条与 ``coins_for_tile``。
+        """
+        return coins_for_tile(max_tile(self.grid))
+
+    def _finish(self, early: bool = False) -> None:
+        self.over = True
+        best = max(self.cfg.best_2048, self.score)
+        self._record_best()
+        earned = self._award_coins()
         self._flash = 1.0
 
-        self.label_title.setText(
-            f"凑出 {TARGET} 了！得分 {self.score}" if self.won
-            else f"推不动了　得分 {self.score}")
+        if early:
+            # 玩家中途收工。**不能沿用"推不动了"** —— 那会让他以为是自己把
+            # 局面走死了，其实是主动结束的。
+            outcome = f"提前收工　得分 {self.score}"
+        elif self.won:
+            outcome = f"凑出 {TARGET} 了！得分 {self.score}"
+        else:
+            outcome = f"推不动了　得分 {self.score}"
+        self.label_title.setText(outcome)
         self.label_sub.setText(
             f"最大块 {max_tile(self.grid)}    最高分 {best}    "
             f"+{earned} 金币{self.coins_note()}（共 {self.cfg.coins}）")

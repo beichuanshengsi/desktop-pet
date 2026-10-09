@@ -108,6 +108,9 @@ class DesktopPetApp:
         self.pet.request_quit.connect(self.quit)
         self.pet.pomodoro_done.connect(self._on_pomodoro_done)
         self.pet.notify.connect(self._on_notify)
+        # 游戏被「暂停，回头再玩」收起来之后，右键菜单里会多一条
+        # 「继续上一局」—— 这条就是它的落点。
+        self.pet.request_resume.connect(self.resume_game)
 
         # 图标走 pet.icon：.ico 里带了 16/24/32/48/64/128/256 各尺寸，
         # Windows 按场景自己挑（托盘 16、任务栏 32、Alt-Tab 64），比自己缩 .png 清晰
@@ -140,13 +143,23 @@ class DesktopPetApp:
     # ------------------------------------------------------------ 小游戏
 
     def open_game(self, kind: str = DEFAULT_GAME) -> None:
-        if self.game is not None and self.game.isVisible():
+        game = self.game
+        if game is not None:
             if self.game_kind == kind:
-                self.game.raise_()
-                self.game.activateWindow()
-                self.game.setFocus()
+                # 同一个游戏：暂停着就接着打（等价于「继续上一局」），
+                # 已经开着就抬到最前面。**两条都算"用户想玩这一款"**，
+                # 不该走到下面去重开一局、把进度冲掉。
+                if game.is_suspended:
+                    self.resume_game()
+                else:
+                    game.raise_()
+                    game.activateWindow()
+                    game.setFocus()
                 return
-            self._close_game()             # 换一个游戏：先收掉旧的，暂停状态保持
+            # 换一个游戏。这里**不能用 ``isVisible()`` 判**：暂停态的窗口是
+            # hide() 过的，``isVisible()`` 为 False —— 那样会既不收掉旧的、
+            # 又把它从 ``self.game`` 上顶掉，那一局就永远留在后台没人管了。
+            self._close_game()
 
         self.tray.show_pet()
         self.pet.set_paused(True)          # 游戏期间冻结桌面漫步，避免两边打架
@@ -155,6 +168,7 @@ class DesktopPetApp:
         self.game_kind = kind
         self.game.setWindowIcon(self.icon)
         self.game.closed.connect(self._on_game_closed)
+        self.game.suspended.connect(self._on_game_suspended)
         self.game.show()
         # 幼儿模式开着的话，游戏窗口也得抬到遮罩之上 —— 不然它是"开出来了
         # 但被玻璃压在下面"，用户看到的是"点了没反应"。放在 show() 之后调，
@@ -164,19 +178,61 @@ class DesktopPetApp:
         self.game.activateWindow()
         self.game.setFocus()
 
-    def _close_game(self) -> None:
-        """拆掉当前游戏窗口，但**不动**暂停状态（换游戏时接管方还要用）。"""
-        if self.game is None:
+    def resume_game(self) -> None:
+        """右键菜单「继续上一局」：把暂停的那一局接回来。
+
+        窗口对象一直都在（暂停只 ``hide()``，没 ``close()``），所以这里只要
+        让它重新显示 + 重新开始计时就行 —— 场景、分数、方块位置全在。
+        """
+        game = self.game
+        if game is None or not game.is_suspended:
             return
+        self.pet.set_paused(True)          # 又回到游戏里了，桌宠接着冻结
+        self.pet.set_suspended_game(None)
+        game.resume()
+        self.kids.adopt(game)              # 幼儿模式下还得抬到遮罩之上
+        game.raise_()
+        game.activateWindow()
+        game.setFocus()
+        self.tray.refresh()
+
+    def _forget_game(self) -> GameWindow | None:
+        """把"当前有一局在手上"这件事清干净（信号断开 + 菜单入口撤掉）。
+
+        返回刚摘下来的那个窗口（本来就没游戏则返回 ``None``）—— 调用方还要
+        拿它去 ``close_settling()`` / ``deleteLater()``。
+        """
         game, self.game = self.game, None
         self.game_kind = None
-        # 先断开，免得 close 触发的 closed 又把 _on_game_closed 跑一遍、解除暂停
-        try:
-            game.closed.disconnect(self._on_game_closed)
-        except (RuntimeError, TypeError):
-            pass
-        game.close()
+        if game is not None:
+            # 先断开，免得 close 触发的 closed 又把 _on_game_closed 跑一遍、解除暂停
+            for sig, slot in ((game.closed, self._on_game_closed),
+                              (game.suspended, self._on_game_suspended)):
+                try:
+                    sig.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
+        self.pet.set_suspended_game(None)
+        return game
+
+    def _close_game(self) -> None:
+        """拆掉当前游戏窗口，但**不动**暂停状态（换游戏时接管方还要用）。
+
+        用 ``close_settling()`` 而不是 ``close()``：如果这一局是玩家按了
+        「暂停，回头再玩」才收起来的，他后来又去点别的游戏 —— 那一局不能被
+        悄悄扔掉（那正是这次要修的毛病）。``close_settling`` 会把它按当前分数
+        结算掉，这里再弹个托盘气泡把钱数说清楚。
+        """
+        game = self._forget_game()
+        if game is None:
+            return
+        earned = game.close_settling()
         game.deleteLater()
+        if earned:
+            self.tray.showMessage(
+                "上一局帮你结算了",
+                f"那局没打完就先收起来了，按当时的分数结了 {earned} 金币。",
+                self.icon, 6000)
 
     def _on_game_closed(self, score: int) -> None:
         self.pet.set_paused(False)
@@ -185,6 +241,17 @@ class DesktopPetApp:
             self.game.deleteLater()
             self.game = None
         self.game_kind = None
+        self.pet.set_suspended_game(None)
+
+    def _on_game_suspended(self) -> None:
+        """「暂停，回头再玩」：桌宠恢复走动，菜单里挂上继续入口。
+
+        **不解引用、不 deleteLater** —— 窗口得留着才能接着打，
+        这是它和 ``closed`` 最本质的区别。
+        """
+        self.pet.set_paused(False)
+        self.pet.set_suspended_game(self.game_kind)
+        self.tray.refresh()
 
     # ------------------------------------------------------------ 番茄钟
 
@@ -258,6 +325,9 @@ class DesktopPetApp:
         # 钩子是**系统级**的：程序退了它还挂着，Win 键会莫名其妙失效，
         # 而用户完全联想不到是桌宠。所以这里必须先卸干净。
         self.kids.shutdown()
+        # 手上有没打完的一局（特别是"暂停，回头再玩"那一局）就先结掉再走 ——
+        # 退出程序时弹确认框是打扰，但把进度悄悄扔掉同样不行。
+        self._close_game()
         self.cfg.save()
         self.tray.hide()
         self.pet.close()

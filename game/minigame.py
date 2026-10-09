@@ -540,13 +540,17 @@ class MiniGame(GameWindow):
                              drop.body.y + DROP_SIZE / 2,
                              text=drop.kind.title, color=drop.kind.color))
 
-    def _finish(self) -> None:
-        self.over = True
+    def _record_best(self) -> None:
         if self.score > self.cfg.best_score:
             self.cfg.best_score = self.score
             self.cfg.save()
+
+    def _finish(self, early: bool = False) -> None:
+        self.over = True
+        self._record_best()
         earned = self._award_coins()
-        self.label_title.setText(f"时间到！本局得分 {self.score}")
+        headline = "提前收工" if early else "时间到！"
+        self.label_title.setText(f"{headline}　本局得分 {self.score}")
         self.label_sub.setText(
             f"最高分 {self.cfg.best_score}    通过 {self.round_no} 轮    "
             f"最高 {self.best_combo} 连（×{combo_mult(self.best_combo)}）    "
@@ -567,10 +571,12 @@ class MiniGame(GameWindow):
             self._jump()
             return
         if key == Qt.Key.Key_R:
-            self._restart()
+            # 走 request_restart 而不是直接 _restart：这一局没打完的话
+            # 要先弹确认框，否则按一下 R 分数就没了、连个提示都没有
+            self.request_restart()
             return
         if key == Qt.Key.Key_Escape:
-            self.close()
+            self.request_close()
             return
         super().keyPressEvent(event)
 

@@ -451,10 +451,12 @@ class Runner(GameWindow):
             self.press_crouch(True)
             return
         if key == Qt.Key.Key_R:
-            self._restart()
+            # 走 request_restart 而不是直接 _restart：这一局没打完的话
+            # 要先弹确认框，否则按一下 R 分数就没了、连个提示都没有
+            self.request_restart()
             return
         if key == Qt.Key.Key_Escape:
-            self.close()
+            self.request_close()
             return
         super().keyPressEvent(event)
 
@@ -520,13 +522,17 @@ class Runner(GameWindow):
         if self._flash > 0:
             self._flash = max(0.0, self._flash - dt * 1.6)
 
-    def _finish(self) -> None:
-        self.over = True
+    def _record_best(self) -> None:
         if self.score > self.cfg.best_runner:
             self.cfg.best_runner = self.score
             self.cfg.save()
+
+    def _finish(self, early: bool = False) -> None:
+        self.over = True
+        self._record_best()
         earned = self._award_coins()
-        self.label_title.setText(f"撞上了！跑了 {self.score} 分")
+        headline = "提前收工" if early else "撞上了！"
+        self.label_title.setText(f"{headline}跑了 {self.score} 分")
         self.label_sub.setText(
             f"最远 {self.cfg.best_runner}    速度档位 {self.tier + 1}    "
             f"撞上时 {self.speed:.0f} px/s    "

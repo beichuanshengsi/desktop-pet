@@ -28,7 +28,7 @@ if str(ROOT) not in sys.path:
 
 from PIL import Image                                      # noqa: E402
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt     # noqa: E402
-from PySide6.QtGui import QMouseEvent, QWheelEvent         # noqa: E402
+from PySide6.QtGui import QCloseEvent, QMouseEvent, QWheelEvent  # noqa: E402
 from PySide6.QtWidgets import (QApplication, QMenu,        # noqa: E402
                                QPushButton, QWidget)
 
@@ -1152,6 +1152,213 @@ def main() -> int:
 
         w._timer.stop()
         w.hide()
+
+    # ------------------------------------------------ 游戏中途退出
+    section("游戏中途退出（确认框 / 暂停 / 结算）")
+
+    # 这一节的由来：以前按 Esc / 点关闭按钮 / 按 R，只要这一局还没打完，
+    # 分数和金币就**全丢**（``_finish()`` 只在时间到/撞死时才跑）。玩家玩了半局
+    # 临时有急事，回来一看白玩。现在中途要走先弹确认框，三个出口：
+    # 按当前分数结算 / 暂停回头再玩 / 取消继续玩。
+
+    check("GameWindow 自己声明了 suspended（契约只此一处）",
+          "suspended" in GameWindow.__dict__)
+    for cls in (MiniGame, CatchGame, Runner, Game2048):
+        check(f"{cls.__name__} 没有另抄一份 suspended（要靠继承）",
+              "suspended" not in cls.__dict__)
+        check(f"{cls.__name__} 覆盖了 _record_best（中途结算也要记最高分）",
+              cls._record_best is not GameWindow._record_best)
+
+    # 「游戏 -> 存档里最高分的字段名」。四个游戏各记各的，这张表只写一份，
+    # 下面按它验"中途结算也记最高分"。
+    BEST_FIELD = {"bounce": "best_score", "catch": "best_catch",
+                  "runner": "best_runner", "2048": "best_2048"}
+
+    def _fresh(kind, score=0):
+        """造一个游戏窗口并把分数调到指定值（这一节只验退出逻辑，不验得分）。
+
+        必须 ``show()``：``isVisible()`` 对"父窗口没显示的控件"一律返回 False，
+        不显示就分不清"浮层真的弹出来了"和"根本显示不出来"。offscreen 平台上
+        ``show()`` 不弹任何真窗口，可以放心用。
+        """
+        w = create_game(kind, bank, cfg)
+        w.score = score
+        w.show()
+        return w
+
+    # ---- 确认框本身：三个出口的文案与顺序
+    probe = _fresh("bounce", 480)
+    labels = [b.text() for b in probe.confirm.findChildren(QPushButton)]
+    check("确认框有三个出口", len(labels) == 3, str(labels))
+    check("三个出口是「结算 / 暂停 / 取消」且顺序固定",
+          labels == ["按当前分数结算", "暂停，回头再玩", "取消，继续玩"],
+          str(labels))
+    check("确认框默认是藏着的（不该一开局就顶着一张浮层）",
+          not probe.confirm.isVisible())
+    check("底座声明了 _finish 契约（四个游戏必须实现，且吃 early 参数）",
+          "_finish" in GameWindow.__dict__)
+
+    # ---- Esc：没打完先问，不打完不关
+    probe.request_close()
+    check("Esc：这一局没打完 -> 弹确认框，而不是直接关",
+          probe.confirm.isVisible() and not probe.over)
+    check("弹框时分数一个字节没动", probe.score == 480)
+
+    # ---- 取消：回到游戏，什么都没变
+    probe._cancel_exit()
+    check("取消：确认框收起来", not probe.confirm.isVisible())
+    check("取消：这一局还在、分数还在",
+          not probe.over and probe.score == 480 and not probe.is_suspended)
+
+    # ---- 按当前分数结算：记最高分 + 发金币 + 弹结算浮层
+    coins_before = cfg.coins
+    probe.cfg.best_score = 0
+    probe.request_close()
+    probe._settle_early()
+    check("结算：这一局结束了", probe.over and probe.settled_early)
+    check("结算：确认框收起、换成结算浮层",
+          not probe.confirm.isVisible() and probe.overlay.isVisible())
+    check("结算：文案是「提前收工」而不是「时间到」",
+          "提前收工" in probe.label_title.text(), probe.label_title.text())
+    check("结算：按当时的分数记了最高分",
+          probe.cfg.best_score == 480, f"best={probe.cfg.best_score}")
+    check("结算：金币按当时的分数发（480 // 10 = 48）",
+          cfg.coins == coins_before + 48, f"{coins_before} -> {cfg.coins}")
+    check("结算：last_earned 记下了这一局实发多少",
+          probe.last_earned == 48, str(probe.last_earned))
+
+    # 已经结算过之后再按 Esc / 再点结算，都不该重复发钱
+    coins_after = cfg.coins
+    probe.request_close()
+    check("结算完再按 Esc：直接关，不再弹确认框（这是玩家本意）",
+          not probe.confirm.isVisible())
+    probe._settle_early()
+    check("已结算过再点结算不重复发钱", cfg.coins == coins_after)
+
+    # ---- 关闭按钮：closeEvent 也要被拦
+    probe2 = _fresh("runner", 300)
+    ev = QCloseEvent()
+    probe2.closeEvent(ev)
+    check("点关闭按钮（closeEvent）：没打完就 event.ignore() + 弹确认框",
+          not ev.isAccepted() and probe2.confirm.isVisible())
+    probe2._cancel_exit()
+
+    # ---- close_now：程序自己拆窗口时绕开确认框
+    # 变量名别叫 seen —— 这个函数前面已经有一个 ``seen = set()`` 了，
+    # 同名会让 pyright 拿后声明的类型去查前面的用法，一次报 5 个假错。
+    closed_scores: list[int] = []
+    probe2.closed.connect(closed_scores.append)
+    probe2.close_now()
+    check("close_now（换游戏/退出程序走的路）：不问，直接关并把分数发出去",
+          closed_scores == [300], str(closed_scores))
+
+    # ---- R 重开：没打完先问，别把这一局的分数冲掉
+    probe3 = _fresh("catch", 260)
+    probe3.request_restart()
+    check("R 重开：这一局没打完 -> 先问，不许直接把分数冲掉",
+          probe3.confirm.isVisible() and probe3.score == 260 and not probe3.over)
+    probe3._cancel_exit()
+    probe3._settle_early()
+    probe3.request_restart()
+    check("R 重开：打完（正看结算浮层）时直接重开",
+          not probe3.over and probe3.score == 0 and not probe3.settled_early)
+
+    # ---- 暂停：状态一个都不能丢
+    held = _fresh("runner", 420)
+    susp_seen: list[int] = []
+    closed_seen: list[int] = []
+    held.suspended.connect(lambda: susp_seen.append(1))
+    held.closed.connect(closed_seen.append)
+    held._timer.start(16)
+    held.suspend()
+    check("暂停：表停了（冻结这一局）", not held._timer.isActive())
+    check("暂停：标记置上", held.is_suspended)
+    check("暂停：窗口藏起来了（桌面还给桌宠）", not held.isVisible())
+    check("暂停：发了 suspended（外面才知道要挂「继续上一局」）",
+          susp_seen == [1], str(susp_seen))
+    check("暂停：**不发 closed**（发了窗口就会被 deleteLater 掉，那就真没了）",
+          closed_seen == [], str(closed_seen))
+    check("暂停：分数和这一局都还在，没结算",
+          held.score == 420 and not held.over and not held.settled_early)
+    held.suspend()
+    check("暂停态再暂停不重复发信号（否则菜单/托盘会被白刷一遍）",
+          susp_seen == [1], str(susp_seen))
+
+    held.resume()
+    check("恢复：表又跑起来", held._timer.isActive())
+    check("恢复：窗口回来了", held.isVisible())
+    check("恢复：标记清掉、分数还在",
+          not held.is_suspended and held.score == 420)
+    held.resume()
+    check("非暂停态调 resume 是空操作（重复点菜单入口不该有副作用）",
+          held._timer.isActive() and not held.is_suspended)
+    held._timer.stop()
+
+    # ---- close_settling：换游戏 / 退出程序时，暂停那一局不能被悄悄扔掉
+    banked = _fresh("catch", 250)
+    coins_before = cfg.coins
+    banked.cfg.best_catch = 0
+    earned = banked.close_settling()
+    check("换游戏/退出：没打完的那一局按当前分数结掉，钱进存档",
+          earned == 25 and cfg.coins == coins_before + 25,
+          f"earned={earned} coins={coins_before}->{cfg.coins}")
+    check("换游戏/退出：顺带也记了最高分", banked.cfg.best_catch == 250)
+    check("换游戏/退出：然后才真的关掉", not banked._timer.isActive())
+
+    # ---- 2048 的金币尺子在中途退出时也必须是"按最大格子"
+    # 直接造 Game2048 而不是走 create_game：后者的返回类型是底座 GameWindow，
+    # 类型检查器不认 ``.grid``（那是 2048 自己的场景）。这一节要动棋盘，
+    # 用具体类型既省一次 cast，也把"我就是要碰它的棋盘"写在脸上。
+    w48 = Game2048(bank, cfg)
+    w48.score = 5000
+    w48.show()
+    check("2048：中途结算按**最大格子**折算，不按分数（否则一局几百金币）",
+          w48._round_coins() == coins_for_tile(max_tile(w48.grid)),
+          f"round={w48._round_coins()} score尺={coins_for(5000)}")
+    w48.grid = ((8, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0))
+    check("2048：盘上真凑出 8 的时候，中途退也能拿到 8 金币",
+          w48._round_coins() == coins_for_tile(8) == 8,
+          str(w48._round_coins()))
+    w48._timer.stop()
+    w48.hide()
+
+    # ---- 右键菜单：暂停之后要挂出「继续上一局」
+    check("PetWindow 自己声明了 request_resume（契约只此一处）",
+          "request_resume" in PetWindow.__dict__)
+    mp = PetWindow(cfg, bank, GAMES)
+    check("没暂停时：菜单里没有「继续上一局」",
+          not any("继续上一局" in a.text() for a in mp._build_menu().actions()))
+    check("set_suspended_game 把标识翻成菜单显示的名字",
+          (mp.set_suspended_game("runner") or mp.suspended_game) == "跑一跑",
+          str(mp.suspended_game))
+    resume_hits: list[int] = []
+    mp.request_resume.connect(lambda: resume_hits.append(1))
+    m2 = mp._build_menu()
+    act = next((a for a in m2.actions() if "继续上一局" in a.text()), None)
+    check("暂停之后：菜单第一层就挂着「继续上一局（跑一跑）」",
+          act is not None and act.text() == "▶ 继续上一局（跑一跑）",
+          act.text() if act else "None")
+    if act is not None:
+        act.trigger()
+    check("点它发的是 request_resume（窗口自己不开游戏，交给 main.py）",
+          resume_hits == [1], str(resume_hits))
+    mp.set_suspended_game(None)
+    check("恢复之后菜单里那条又没了",
+          not any("继续上一局" in a.text() for a in mp._build_menu().actions()))
+    mp.set_suspended_game("不存在的游戏")
+    check("清单里没有的标识也不显示成空白", mp.suspended_game == "不存在的游戏",
+          str(mp.suspended_game))
+    mp.hide()
+    mp.deleteLater()
+
+    # 这一节把窗口 show() 出来过，收尾时统一关掉 —— 留着它们会一直挂着
+    # 16ms 的精确计时器，后面的用例会被无关的 tick 搅乱。
+    for gone in (probe, probe2, probe3, held, banked):
+        try:
+            gone._timer.stop()
+            gone.close_now()
+        except RuntimeError:               # 已经关掉了
+            pass
 
     # ---------------------------------------------------------- 养成状态
     section("养成状态（饱食 / 心情 / 精力）")
