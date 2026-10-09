@@ -57,6 +57,9 @@ reports/*.pdf
 reports/_tmp/
 reports/_tmp_actions/
 
+# 反查卡片的临时诊断图（tools/find_card_by_shot.py 产出，随时可重生成）
+reports/_match/
+
 # 打包产物：能随时重建，且体积大（dist 151M / installer 49M），
 # 一旦 add -A 吃进去，想清掉就得改历史。
 #   注：安装脚本源码 installer.iss 在项目**根目录**，不受这条影响。

@@ -59,8 +59,8 @@ def main() -> int:
     print("\n[1] 卡池")
     pool = load_pool(fresh=True)
     check("卡池非空", bool(pool), f"{len(pool)} 张")
-    check("共 104 张", len(pool) == 104, f"{len(pool)}")
-    for tier, want in (("普通", 53), ("稀有", 26), ("史诗", 18), ("传说", 7)):
+    check("共 102 张", len(pool) == 102, f"{len(pool)}")
+    for tier, want in (("普通", 51), ("稀有", 26), ("史诗", 18), ("传说", 7)):
         got = pool.count_tier(tier)
         check(f"{tier} {want} 张", got == want, f"{got}")
     check("出率之和为 1", abs(sum(RATE.values()) - 1.0) < 1e-9,
@@ -207,10 +207,10 @@ def main() -> int:
     album = Album(cfg, rng=random.Random(13), cards=pool)
     for card in pool.all():
         album._grant(card.id)
-    check("图鉴已满", album.owned_kinds() == 104)
+    check("图鉴已满", album.owned_kinds() == len(pool), f"{album.owned_kinds()}/{len(pool)}")
     pull = album.pull()
     check("满图鉴后抽到的是重复（图鉴数不变）",
-          pull is not None and not pull.is_new and album.owned_kinds() == 104)
+          pull is not None and not pull.is_new and album.owned_kinds() == len(pool))
     check("重复张会计数", album.duplicates() == 1, f"{album.duplicates()}")
 
     print("\n" + "=" * 62)

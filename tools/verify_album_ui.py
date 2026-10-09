@@ -118,10 +118,13 @@ def main() -> int:
     panel.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     panel.show()
     check("窗口建起来了", True)
-    check("一页 12 张", len(panel._cells) == 12)
-    check("总页数 = ceil(104 / 12) == 9", panel._page_count() == 9,
-          f"{panel._page_count()}")
-    check("第一页显示的卡数正确", len(panel._page_cards()) == 12)
+    total = len(panel._cards)
+    page = panel.PAGE
+    check(f"一页 {page} 张", len(panel._cells) == page)
+    want_pages = -(-total // page)  # 向上取整
+    check(f"总页数 = ceil({total} / {page}) == {want_pages}",
+          panel._page_count() == want_pages, f"{panel._page_count()}")
+    check("第一页显示的卡数正确", len(panel._page_cards()) == page)
     panel.resize(panel.size())
     shot = panel.grab()
     check("卡册能渲染成图", not shot.isNull(), f"{shot.width()}×{shot.height()}")
@@ -135,7 +138,8 @@ def main() -> int:
     check("第一页不能再往前", panel._page == 0)
     panel._page = panel._page_count() - 1
     panel.refresh()
-    check("最后一页是 8 张", len(panel._page_cards()) == 104 - 12 * 8,
+    last_n = total - page * (panel._page_count() - 1)
+    check(f"最后一页是 {last_n} 张", len(panel._page_cards()) == last_n,
           f"{len(panel._page_cards())}")
     panel.grab().save(str(out_dir / "卡册_最后一页.png"))
 
