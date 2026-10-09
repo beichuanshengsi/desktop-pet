@@ -50,14 +50,14 @@ from .album_panel import AlbumPanel
 from .anim import Animator
 from .assets import AssetBank
 from .bag import Bag
-from .behavior import Brain, FPS, State
+from .behavior import NAP_MIN_SECONDS, Brain, FPS, State
 from .cards import Album, Pull, Trade
 from .config import Config, hours_since, now_stamp, today_stamp
 from .panel import BagPanel
 from .paths import pet_asset_dir
 from .physics import (FLING_RESTITUTION, Motion, VelocitySampler, clamp_fling)
 from .pomodoro import Pomodoro, describe as describe_span
-from .vitals import Vitals
+from .vitals import ENERGY_REST_PER_MIN, NAP_BOOST, RESTED_AT, Vitals
 from .wheel_dialog import DurationDialog
 
 BASE_SIZE = 128          # 贴图逻辑边长
@@ -87,6 +87,20 @@ class FeedPlan:
     free: bool                              #: 走今天那份免费额度（不消耗东西）
     item: menulib.ShopItem | None = None    #: 要消耗的商品（免费时为 ``None``）
     left: int = 0                           #: 那样东西吃掉之后还剩几个
+
+
+@dataclass(frozen=True)
+class NapPlan:
+    """点一下「去睡一会儿」会发生什么 —— 和 ``FeedPlan`` 同一个路数。
+
+    ``PetWindow.nap()`` 和菜单那一行（``menu.nap_text``）读的是同一份计划。
+    分两处各判一遍的话，会出现"菜单写着它已经睡着、点下去又把它叫起来"
+    这种自相矛盾，而这一行字正是用户唯一能看见"点下去会怎样"的地方。
+    """
+
+    ready: bool                             #: 现在能不能叫它睡
+    why: str = ""                           #: ``ready=False`` 时的一句原因
+    minutes: float = 0.0                    #: 能睡时：大约几分钟睡饱
 
 
 class PetWindow(QWidget):
@@ -254,9 +268,15 @@ class PetWindow(QWidget):
         """推进养成状态：睡着走 ``rest``（回精力），醒着走 ``awake``（掉三项）。
 
         **和暂停无关**：玩游戏那段时间也是真实流逝的时间，当然也要饿。
+
+        「去睡一会儿」那一觉按 ``NAP_BOOST`` 加速，而且加速的是**整段时间**、
+        不是单独把精力那一项调快 —— 于是这一觉对饱食 / 心情的总账和自然睡
+        完全一样，只是压缩进 1/3 的真实时间（理由写在 ``vitals.NAP_BOOST``）。
+        "这一觉是不是用户安排的"由状态机说了算（``brain.napping``），
+        窗口不另记一个 flag。
         """
         if self.brain.state is State.SLEEP:
-            self.vitals.rest(dt)
+            self.vitals.rest(dt * (NAP_BOOST if self.brain.napping else 1.0))
         else:
             self.vitals.awake(dt)
 
@@ -841,6 +861,51 @@ class PetWindow(QWidget):
         self.brain.feed(seconds=self._oneshot_seconds(State.FEED))
         self._sync_anim(True)
         self.notify.emit("喂饱了", "今天这份免费，下次得从背包里拿")
+
+    def nap_plan(self) -> NapPlan:
+        """现在叫它睡，会发生什么。菜单那一行和 ``nap()`` 读的是同一份。
+
+        **三种"点不了"各给一句人话** —— 菜单上灰掉并写明原因，比点下去没反应
+        强，跟「喂一口」那一行同一个道理：
+
+        * 已经在睡 → "它已经睡着了"；
+        * 正被拎着 / 正在掉 → "先把它放到地上"，半空趴下很怪
+          （自动睡也不在这两个状态里发生）；
+        * 精力还足（``rested``）→ "它不困"，硬睡的话趴下几秒就够到醒来那条线。
+
+        能睡时算一个"睡饱大约几分钟"：按 ``NAP_BOOST`` 加速后的速率折算，
+        不必等它睡完才知道。**最短时长也要算进去** —— 精力快满的时候，真正
+        决定它躺多久的是 ``NAP_MIN_SECONDS``（回复早已顶到上限），不是速率。
+        """
+        if self.brain.state is State.SLEEP:
+            return NapPlan(False, "它已经睡着了")
+        if self.brain.state in (State.DRAG, State.FALL):
+            return NapPlan(False, "先把它放到地上")
+        if self.vitals.rested:
+            return NapPlan(False, f"它不困（精力 {self.vitals.energy:.0f}）")
+
+        per_min = ENERGY_REST_PER_MIN * NAP_BOOST
+        to_rested = max(0.0, RESTED_AT - self.vitals.energy) / per_min
+        return NapPlan(True, "", max(to_rested, NAP_MIN_SECONDS / 60.0))
+
+    def nap(self) -> None:
+        """「去睡一会儿」：用户主动安排它睡一觉。
+
+        判定走 ``nap_plan()`` —— 和菜单那一行**同一份**。真正让它睡下去的是
+        ``Brain.sleep_now()``；三条值在睡的过程中由 ``_tick_vitals`` 推进、
+        由 ``_persist`` 统一落盘，所以这里不碰存档，也不用等它睡醒才存。
+        """
+        plan = self.nap_plan()
+        if not plan.ready:
+            # 菜单那一行是灰的，正常点不到这儿。但判定必须在动作里再做一次
+            # （和 feed / buy 同一个道理）：菜单搭好到点下去之间状态是会变的。
+            self.notify.emit("先别叫它睡", plan.why)
+            return
+        if not self._action_ready("nap"):
+            return
+        self.brain.sleep_now()
+        self._sync_anim(True)
+        self.notify.emit("睡着了", f"睡饱大约 {plan.minutes:.0f} 分钟，到点它自己会醒")
 
     def _action_ready(self, key: str) -> bool:
         """连点保护：太密就丢掉这次，免得动作被反复打断。

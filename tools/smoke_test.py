@@ -1270,6 +1270,117 @@ def main() -> int:
     hw._timer.stop()
     hw._save_timer.stop()
 
+    # ---------------------------------------------------------- 主动小睡
+    section("主动小睡（去睡一会儿）")
+
+    from pet.behavior import NAP_MIN_SECONDS                        # noqa: E402
+    from pet.vitals import (ENERGY_REST_PER_MIN, NAP_BOOST,          # noqa: E402
+                            RESTED_AT)
+
+    # ---- 状态机：两个入口，一套出口
+    nb = Brain(auto_walk=False)
+    check("一开始不是主动小睡", not nb.napping)
+    nb.sleep_now()
+    check("sleep_now 立刻进 SLEEP（不看 tired，你说睡它就睡）",
+          nb.state is State.SLEEP, nb.state.value)
+    check("这一觉被标记成'用户安排的'（窗口据此决定要不要加速）", nb.napping)
+
+    for _ in range(10):
+        nb.update(1.0, on_ground=True, rested=True)     # 就算已睡饱也不该马上醒
+    check("主动小睡有最短时长：睡 10 秒不会就起来（否则看着像没睡）",
+          nb.state is State.SLEEP, f"还剩 {nb._nap_min:.0f}s")
+    for _ in range(int(NAP_MIN_SECONDS) + 1):
+        nb.update(1.0, on_ground=True, rested=True)
+    check("躺够最短时长、且已睡饱，就自己醒", nb.state is State.IDLE, nb.state.value)
+    check("醒来后'主动小睡'标记要清掉（不清的话下一觉会白捡加速）", not nb.napping)
+
+    nb2 = Brain(auto_walk=False)
+    nb2.update(0.5, on_ground=True, tired=True)
+    check("累趴下仍然是 SLEEP，但不是主动小睡",
+          nb2.state is State.SLEEP and not nb2.napping)
+    nb2.update(0.5, on_ground=True, rested=True)
+    check("自然睡不受最短时长影响：睡饱立刻醒",
+          nb2.state is State.IDLE, nb2.state.value)
+
+    # ---- 窗口层：加速真的生效，且不产生额外收益
+    secs = (RESTED_AT - 25.0) / (ENERGY_REST_PER_MIN * NAP_BOOST) * 60.0
+    steps = int(round(secs / 5.0))                     # 5 秒一步
+
+    napw = PetWindow(Config(), bank, GAMES)
+    napw.brain.auto_walk = False
+    napw._timer.stop()
+    napw._save_timer.stop()
+    napw.vitals.satiety = napw.vitals.mood = 50.0
+    napw.vitals.energy = 25.0
+    check("能睡时 nap_plan 给出'大约几分钟'",
+          napw.nap_plan().ready and napw.nap_plan().minutes > 0.0,
+          f"{napw.nap_plan().minutes:.1f} 分钟")
+    napw._last_action.clear()
+    napw.nap()
+    check("nap() 之后它真的睡下了，并标记为主动小睡",
+          napw.brain.state is State.SLEEP and napw.brain.napping,
+          napw.brain.state.value)
+    for _ in range(steps):
+        napw._advance(5.0)
+
+    natw = PetWindow(Config(), bank, GAMES)
+    natw.brain.auto_walk = False
+    natw._timer.stop()
+    natw._save_timer.stop()
+    natw.vitals.satiety = natw.vitals.mood = 50.0
+    natw.vitals.energy = 25.0
+    natw.brain._enter(State.SLEEP)                     # 自然睡（不加速）
+    for _ in range(steps):
+        natw._advance(5.0)
+
+    check(f"同样 {secs:.0f} 秒：主动小睡已经睡饱起身，自然睡还趴着（加速生效）",
+          napw.brain.state is State.IDLE and natw.brain.state is State.SLEEP,
+          f"{napw.brain.state.value} / {natw.brain.state.value}")
+    for _ in range(int(round(secs * NAP_BOOST / 5.0)) - steps):
+        natw._advance(5.0)
+    check(f"主动小睡 {secs/60:.1f} 分钟睡饱 vs 自然睡 {secs*NAP_BOOST/60:.1f} 分钟，"
+          "而三项总账完全一致（加速的是整段时间 ⇒ 不多送资源）",
+          abs(napw.vitals.energy - natw.vitals.energy) < 1e-9
+          and abs(napw.vitals.mood - natw.vitals.mood) < 1e-9
+          and abs(napw.vitals.satiety - natw.vitals.satiety) < 1e-9,
+          f"小睡 {napw.vitals.energy:.0f}/{napw.vitals.mood:.2f}/{napw.vitals.satiety:.2f} "
+          f"自然 {natw.vitals.energy:.0f}/{natw.vitals.mood:.2f}/{natw.vitals.satiety:.2f}")
+
+    # ---- 三种"点不了"各给一句人话，菜单跟着灰掉
+    mw = PetWindow(Config(), bank, GAMES)
+    mw.brain.auto_walk = False
+    mw._timer.stop()
+    mw._save_timer.stop()
+    mw.vitals.energy = 40.0
+    check("精力不足时可以睡", mw.nap_plan().ready)
+    mw.vitals.energy = 95.0
+    check("精力充足时不给睡，并说明原因（硬睡只会趴下几秒又起来）",
+          not mw.nap_plan().ready and "不困" in mw.nap_plan().why,
+          mw.nap_plan().why)
+    mw.vitals.energy = 40.0
+    mw.brain.drag_start()
+    check("拎着的时候不给睡", not mw.nap_plan().ready, mw.nap_plan().why)
+    mw.brain.sleep_now()
+    check("已经在睡了就不再安排一次", not mw.nap_plan().ready, mw.nap_plan().why)
+
+    mm = QMenu()
+    menulib.add_interactions(mm, mw)
+    acts = {a.text(): a for a in mm.actions()}
+    check("菜单里有「去睡一会儿」",
+          any(t.startswith("去睡一会儿") for t in acts), " / ".join(acts))
+    asleep_label = "去睡一会儿（它已经睡着了）"
+    check("已经在睡时那一行是灰的、并写明原因",
+          asleep_label in acts and not acts[asleep_label].isEnabled(),
+          " / ".join(acts))
+    mw.brain._enter(State.IDLE)
+    mw.vitals.energy = 40.0
+    mm2 = QMenu()
+    menulib.add_interactions(mm2, mw)
+    live = [a for a in mm2.actions() if a.text().startswith("去睡一会儿")]
+    check("能睡时那一行可点，并且写出'睡饱约几分钟'",
+          len(live) == 1 and live[0].isEnabled() and "分钟" in live[0].text(),
+          live[0].text() if live else "(没有这一行)")
+
     # ---------------------------------------------------------- 甩出去
     section("甩出去（拖拽投掷）")
 

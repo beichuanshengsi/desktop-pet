@@ -173,14 +173,54 @@ def feed_text(plan: _FeedPlan | None) -> str:
     return f"喂一口（吃掉{plan.item.label}，还剩 {plan.left}）"
 
 
-def add_interactions(menu: QMenu, pet) -> None:
-    """逗它玩 / 喂一口 —— 两个菜单都指到同一对方法上，别各接各的。
+class _NapPlan(Protocol):
+    """「去睡一会儿」这一刻的计划，形状与 ``PetWindow.nap_plan()`` 一致。
 
-    「喂一口」的文字和能不能点是**当场按 ``pet.feed_plan()`` 算出来的**：
-    今天那份免费额度还在就写"今天免费"，用完了写"吃掉某某"，
-    背包里也没有吃的就灰掉并说明原因 —— 点了没反应，比直接说清楚更让人困惑。
+    同样是 Protocol 而不是反向 import ``window``（理由见 ``_ToggleTarget``）。
+    三个字段都声明成 ``@property``（只读），因为对面是 frozen dataclass ——
+    声明成可写的话 pyright 会判它不满足这个形状（见 ``_FeedPlan``）。
+    """
+
+    @property
+    def ready(self) -> bool: ...        # 现在能不能叫它睡
+    @property
+    def why(self) -> str: ...           # 不能睡时的一句原因
+    @property
+    def minutes(self) -> float: ...     # 能睡时：大约几分钟睡饱
+
+
+def nap_text(plan: _NapPlan) -> str:
+    """「去睡一会儿」那一行的文字。
+
+    ``plan`` 是 ``PetWindow.nap_plan()`` 的结果。**不能点的时候必须说清是哪种
+    情况** —— "已经在睡""正被拎着""不困"是三件完全不同的事，全灰成一样的
+    "去睡一会儿"，用户只能自己猜为什么点了没反应。
+
+    能睡的时候把"大约几分钟睡饱"写出来：这一行是用户决定"现在叫它睡合不合适"
+    的唯一依据（手头有事就走开，别在这儿等它）。
+    """
+    if not plan.ready:
+        return f"去睡一会儿（{plan.why}）"
+    return f"去睡一会儿（睡饱约 {plan.minutes:.0f} 分钟）"
+
+
+def add_interactions(menu: QMenu, pet) -> None:
+    """逗它玩 / 去睡一会儿 / 喂一口 —— 菜单和托盘都指到同一批方法上，别各接各的。
+
+    「喂一口」和「去睡一会儿」的文字、能不能点，都是**当场按计划算出来的**
+    （``pet.feed_plan()`` / ``pet.nap_plan()``）：今天那份免费额度还在就写
+    "今天免费"，用完了写"吃掉某某"，背包里也没有吃的就灰掉并说明原因 ——
+    点了没反应，比直接说清楚更让人困惑。睡觉同理：已经在睡、正被拎着、
+    精力还足，三种情况各写各的。
+
+    **睡觉排在「逗它玩」后面、喂一口前面**：它是"照顾"里最轻的一个动作
+    （不用花钱、不用背包），要和另外两件挨着，别塞进小卖部那种消费类子菜单。
     """
     menu.addAction("逗它玩", pet.poke)
+
+    nap = pet.nap_plan()
+    nap_act = menu.addAction(nap_text(nap), pet.nap)
+    nap_act.setEnabled(nap.ready)
 
     plan = pet.feed_plan()
     feed = menu.addAction(feed_text(plan), pet.feed)

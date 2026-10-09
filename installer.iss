@@ -6,11 +6,15 @@
 ;     --icon assets/icon.ico --add-data "assets/pet;assets/pet" ^
 ;     --add-data "assets/game;assets/game" --add-data "assets/fonts;assets/fonts" ^
 ;     --add-data "assets/sfx;assets/sfx" --add-data "assets/icon.ico;assets" ^
-;     --add-data "assets/icon.png;assets" --add-data "custom_pet/*.png;assets/pet" ^
+;     --add-data "assets/icon.png;assets" --add-data "assets/cards;assets/cards" ^
+;     --add-data "custom_pet/*.png;assets/pet" ^
 ;     --add-data "custom_pet/facing.json;assets/pet" --exclude-module tkinter main.py
+;
+; 注：`assets/cards`（104 张卡池 + cards.json）是 v2.3.0 加的，v2.4.0 补进这一行 ——
+; 漏了它打出来的安装包没有卡册，而开发态直接读项目根，看不出问题。
 
 #define AppName "小狗桌宠"
-#define AppVer "2.2.1"
+#define AppVer "2.4.0"
 #define AppExe "DesktopPet.exe"
 #define AppPublisher "王蓬"
 

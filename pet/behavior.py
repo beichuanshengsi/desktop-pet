@@ -17,6 +17,7 @@
   IDLE / WALK ──按下鼠标并拖动──> DRAG ──松开──> FALL ──落地──> IDLE
 
   IDLE ──精力见底（``tired``）──> SLEEP ──睡饱 / 被叫醒──> IDLE
+  IDLE ──菜单「去睡一会儿」（``sleep_now()``）──> SLEEP（出口同上）
   SLEEP ──点击「逗它玩」──> POKE ──播完──> IDLE（随后进入"刚醒"缓冲）
 
 DRAG 与 FALL 一律由外部事件驱动（鼠标事件、物理落地），计时器管不到它们；
@@ -34,7 +35,13 @@ SLEEP 与"走近"意图
 ------------------
 
 SLEEP 是**唯一的持续型自主动作**（其余循环态只有 IDLE / WALK）：它由
-"精力见底"这个外部事实触发，由"睡饱"或"被叫醒"结束，时长不由计时器定。
+"精力见底"这个外部事实触发、或者由用户主动叫它睡（``sleep_now()``），
+由"睡饱"或"被叫醒"结束，时长不由计时器定。
+
+**两个入口共用一套出口**：不管是累趴下还是你叫它睡，醒来的条件都是
+``rested`` 或被戳（poke / feed 会把它切走）—— 不为"主动小睡"另开一条醒来
+路径，否则两条路迟早各走各的。两者的差别只有两条，都在 ``sleep_now`` 里：
+① 不看 ``tired``；② 有一个最短时长，免得精力本来就快满的时候趴下几秒又起来。
 
 判定所依据的 ``tired`` / ``rested`` **不由本模块计算** —— 饱食 / 心情 / 精力那三条值
 住在 ``pet/vitals.py``，本模块只接两个布尔事实，跟 ``on_ground`` 一个路数。
@@ -109,6 +116,14 @@ SEEK_ARRIVE_PX = 10.0
 #: 缓冲期内它保持清醒（哪怕精力很低），缓冲一过困意才重新说了算。
 WAKE_HOLD = 25.0
 
+#: 「去睡一会儿」这一觉的最短时长（秒），见 ``Brain.sleep_now``。
+#:
+#: 没有它会有个洋相：精力 80 的时候点一下，回复到 82 只要几秒，于是它
+#: 趴下、翻半个身、又站起来 —— 看起来像没睡。给个下限之后，不管你点的时候
+#: 精力多少，它至少躺够这么久，读起来才像"睡了一觉"（睡姿那套素材一个循环
+#: 5.5 秒，一分钟够翻十来次，看得出是在睡）。
+NAP_MIN_SECONDS = 60.0
+
 
 
 class Brain:
@@ -127,6 +142,10 @@ class Brain:
         self.seek_x: float | None = None
         #: 被叫醒后的清醒缓冲，见 WAKE_HOLD
         self._wake_hold = 0.0
+        #: 这一觉是不是用户主动安排的（见 ``sleep_now`` / ``napping``）
+        self._nap = False
+        #: 主动小睡的"最短时长"倒计时（秒），见 ``NAP_MIN_SECONDS``
+        self._nap_min = 0.0
         self._elapsed = 0.0
         self._duration = 0.0
         self._enter(State.IDLE)
@@ -147,6 +166,12 @@ class Brain:
 
     def _enter(self, state: State) -> None:
         self.state = state
+        # 离开 SLEEP 就把"这一觉是什么性质"清掉。``_nap`` 决定窗口要不要给它
+        # 加速回复，留着不清的话，**下一觉**（哪怕是累趴下的自然睡）会白捡
+        # 上一觉的加速 —— 那种 bug 在界面上完全看不出来，只能靠这里收干净。
+        if state is not State.SLEEP:
+            self._nap = False
+            self._nap_min = 0.0
         self._elapsed = 0.0
         self._duration = self._pick_duration(state)
 
@@ -181,6 +206,37 @@ class Brain:
         不然 FALL 会一直等一个永远不来的落地事件，卡在半空演下坠。
         """
         self._enter(State.IDLE)
+
+    def sleep_now(self, *, min_seconds: float = NAP_MIN_SECONDS) -> None:
+        """「去睡一会儿」：用户主动叫它睡。
+
+        和"累了自己趴下"共用同一个 SLEEP 状态、同一套出口（睡饱 / 被戳醒）——
+        只有两条不同：
+
+        * **不看 ``tired``** —— 你说睡它就睡，哪怕它精力还剩一大截；
+        * **有最短时长**（``min_seconds``）—— 免得精力本来就快满的时候趴下
+          几秒就够到 ``rested`` 又站起来，看着像没睡。
+
+        顺手做两件必须做的事：撤掉"要去某处"的意图（都要睡了，还奔着目标走
+        没道理），并把 ``_wake_hold`` 清零 —— 你刚戳醒它、又立刻说"去睡"，
+        后一句该说了算，否则它会因为那段缓冲期干站着不睡。
+        """
+        self._cancel_seek()
+        self._wake_hold = 0.0
+        self._nap = True
+        self._nap_min = max(0.0, float(min_seconds))
+        self._enter(State.SLEEP)
+
+    @property
+    def napping(self) -> bool:
+        """当前这一觉是不是用户主动安排的那一次。
+
+        窗口拿它决定要不要按 ``vitals.NAP_BOOST`` 给回复加速。**放在这里、
+        而不是让窗口自己记一个 flag**：状态在哪儿，"这一觉是什么性质"就该在哪儿 ——
+        窗口另记一份的话，它在睡的时候被戳醒，窗口那份就留在原地了，
+        下一觉（累趴下的自然睡）会莫名其妙地加速。
+        """
+        return self.state is State.SLEEP and self._nap
 
     def poke(self, *, seconds: float | None = None) -> None:
         """逗它玩：被点了一下的一次性反馈动作。
@@ -280,7 +336,12 @@ class Brain:
         if self.state is State.SLEEP:
             # 睡饱了才醒（``rested``），或者被戳（poke/feed 会把它切走）。
             # 这两个就是全部出口 —— 没有第三个，所以 SLEEP 期间不能让它闲着。
-            if rested:
+            #
+            # 主动小睡（``sleep_now``）还多一道闸：最短时长没倒数完就不许醒，
+            # 免得精力本来就快满的时候趴下几秒又站起来。自然睡 ``_nap_min``
+            # 恒为 0，走到这里等于没这道闸，行为与老版本一致。
+            self._nap_min = max(0.0, self._nap_min - dt)
+            if rested and self._nap_min <= 0.0:
                 self._enter(State.IDLE)
             return
 
@@ -333,6 +394,7 @@ class Brain:
     def busy(self) -> bool:
         """是否处于玩家互动中（拖拽 / 被点击或投喂后的动作）。
 
-        SLEEP 不算 —— 它是"精力见底"自己趴下的，不是玩家招来的。
+        SLEEP 不算 —— 它是一段**持续**的状态（累趴下、或你叫它睡），
+        不是"这一个动作还没演完"，两者的时间尺度差着两个数量级。
         """
         return self.state in (State.DRAG, *ONESHOT)
