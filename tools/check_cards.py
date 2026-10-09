@@ -29,8 +29,9 @@ from _isolate import assert_isolated, isolate_storage               # noqa: E402
 STORAGE = isolate_storage("check_cards")
 assert_isolated()
 
-from pet.cards import (COIN_PER_PULL, COST, DISSOLVE, EQUIP_BONUS, EQUIP_CAP,  # noqa: E402
-                       GUARD, LOW_TO_HIGH_CAP, LOW_TO_HIGH_RATE, RATE, WEEKLY_QUOTA,
+from pet.cards import (BOOST_COST_HIGH, COIN_PER_PULL, COST, DISSOLVE,  # noqa: E402
+                       EQUIP_BONUS, EQUIP_CAP, EQUIP_SLOTS, GUARD,
+                       LOW_TO_HIGH_CAP, LOW_TO_HIGH_RATE, RATE, WEEKLY_QUOTA,
                        Album, coin_bonus, coins_with_bonus, load_pool, week_stamp)
 from pet.config import STAMP_FMT, Config                            # noqa: E402
 
@@ -239,6 +240,70 @@ def main() -> int:
     again.album_owned_only = False
     check("默认是整本图鉴（新玩家得先看见还有多少没收集）",
           Config().album_owned_only is False)
+
+    print("\n[13] 用碎片提前开一格装备槽（v2.7.0）")
+    # 这一节验的核心只有一句话：**存档里存的是"买过几格"，不是"现在几格"**。
+    # 存总数就等于把时钟冻结在写档那一刻，往后日子再走也不动了。
+    cfg = fresh_cfg(frag_high=0)
+    album = Album(cfg, rng=random.Random(3), cards=pool)
+    check("新档：时间给 1 格 / 买到 0 格 / 合计 1 格",
+          (album.time_slots(), album.bought_slots(), album.slots()) == (1, 0, 1))
+    check("高级碎片不够时挡住，并说清还差多少",
+          not album.can_boost()
+          and f"还差 {BOOST_COST_HIGH} 个高级碎片" in album.boost_block_reason(),
+          album.boost_block_reason())
+
+    cfg.frag_high = BOOST_COST_HIGH - 1
+    check("差 1 个也买不了（边界）", not album.can_boost(), album.boost_block_reason())
+    cfg.frag_high = BOOST_COST_HIGH
+    check("刚好够就能买", album.can_boost())
+    check("买成功了", album.boost_slot() is True)
+    check("扣掉的是高级碎片", cfg.frag_high == 0, f"{cfg.frag_high}")
+    check("存档记的是「买过 1 格」而不是「现在 2 格」",
+          cfg.slot_boost == 1, f"{cfg.slot_boost}")
+    check("合计变 2 格", album.slots() == 2, f"{album.slots()}")
+    check("不占每周兑换额度（额度管换卡，不管这个）",
+          cfg.weekly_used == {} and cfg.low_convert_used == 0)
+    check("不碰金币（金币是唯一上游，动它就长出反馈环）",
+          cfg.coins == 0, f"{cfg.coins}")
+    check("碎片不够时再买不扣钱也不加格",
+          album.boost_slot() is False and cfg.frag_high == 0 and cfg.slot_boost == 1)
+
+    # 时间往前走：买的那一格不能让总数越界，也不能阻止时间继续给
+    cfg.launched_at = (datetime.now() - timedelta(days=120)).strftime(STAMP_FMT)
+    check("时间给满 5 格后，买过的那格不再让总数越界",
+          album.time_slots() == EQUIP_SLOTS and album.slots() == EQUIP_SLOTS,
+          f"time={album.time_slots()} slots={album.slots()}")
+    check("时间给满后不能再买",
+          not album.can_boost() and "全开" in album.boost_block_reason(),
+          album.boost_block_reason())
+    check("时间给满时没有「下一格」", album.next_slot_days() is None)
+
+    # 存档被手改坏了也不越界
+    cfg.slot_boost = 99
+    check("手改成 99 也只当 5 格算", album.bought_slots() == EQUIP_SLOTS,
+          f"{album.bought_slots()}")
+    cfg.slot_boost = -3
+    check("负数当 0 算", album.bought_slots() == 0, f"{album.bought_slots()}")
+
+    # next_slot_days：界面靠它提醒"快自然到了就别买"
+    stamp19 = (datetime.now() - timedelta(days=19)).strftime(STAMP_FMT)
+    a2 = Album(fresh_cfg(launched_at=stamp19), cards=pool)
+    left = a2.next_slot_days()
+    check("第 19 天：第 2 格还差约 2 天（21 − 19）",
+          left is not None and abs(left - 2.0) < 0.05, f"{left}")
+    stamp21 = (datetime.now() - timedelta(days=21)).strftime(STAMP_FMT)
+    a2 = Album(fresh_cfg(launched_at=stamp21), cards=pool)
+    left = a2.next_slot_days()
+    check("第 21 天（第 4 周）：时间那份变 2 格，下一格顺延到第 42 天",
+          a2.time_slots() == 2 and left is not None and abs(left - 21.0) < 0.05,
+          f"time={a2.time_slots()} left={left}")
+
+    # 存进去、读回来；老档缺字段要有兜底
+    cfg3 = fresh_cfg(slot_boost=2)
+    cfg3.save()
+    check("slot_boost 写进存档、读得回来", Config.load().slot_boost == 2)
+    check("老存档缺这个字段 -> 默认 0（不会读崩）", Config().slot_boost == 0)
 
     print("\n" + "=" * 62)
     if FAILS:

@@ -104,6 +104,26 @@ EQUIP_CAP = 0.20
 EQUIP_SLOTS = 5
 SLOT_EVERY_WEEKS = 3
 
+#: 用高级碎片**提前**开一格装备槽的代价。
+#:
+#: 定位：**给不想等的人一个出口，不是最优路径**（见 ``抽卡参数方案.md`` 第十节）。
+#: 它和"金币买槽"是两回事 —— 金币是这套经济唯一的上游，让金币能买槽
+#: 会立刻长出"买槽 → 加成 → 更多金币 → 更多槽"的正反馈环；碎片是抽卡的
+#: **下游副产品**，买它不改变上游，环就立不起来。
+#:
+#: 为什么是 40 而不是更贵：模拟 13 周的碎片累积（每周 18 抽、重复全分解、
+#: 低换高额度用满、**且一次兑换都不做** —— 这已经是乐观上限了）：
+#: 第 4 周 15 个、第 7 周 42 个、第 9 周 58 个、第 13 周 114 个。
+#: 取 60 的话要到第 9 周才够 —— 而那时时间已经给了 3 格，"能买"的窗口
+#: 只剩 1~2 格，这个功能就等于没做。40 让它落在第 7 周前后：
+#: 代价是**几乎全部碎片** + 放弃一次多兑换，正好"肉疼但够得着"。
+#:
+#: 为什么它不会破坏 26 周的时间线：槽位解锁的**节奏**是零平衡成本的
+#: （方案第四节：每 3 周解锁与固定 5 槽的总时长完全一样）。所以即使
+#: 每一格都靠买，也只是把"装满 5 格"提前，真正的刹车是单抽价 60
+#: 和加成硬顶 20%，那两个一个都没动。
+BOOST_COST_HIGH = 40
+
 
 # ================================================================ 卡
 
@@ -432,22 +452,51 @@ class Album:
 
     # ------------------------------------------------------------ 装备
 
-    def slots(self) -> int:
-        """已经解锁了几个装备槽。"""
-        weeks = self.weeks_played()
-        return min(EQUIP_SLOTS, 1 + (weeks - 1) // SLOT_EVERY_WEEKS)
-
-    def weeks_played(self) -> int:
-        """从首次运行算起是第几周（第 1 周 = 头 7 天）。"""
+    def days_played(self) -> float:
+        """从首次运行算起过了多少天（时间戳缺失/非法一律当 0）。"""
         started = str(self.cfg.launched_at or "")
         if not started:
-            return 1
+            return 0.0
         try:
             t0 = datetime.strptime(started, STAMP_FMT)
         except ValueError:
-            return 1
-        days = max(0.0, (datetime.now() - t0).total_seconds() / 86400.0)
-        return int(days // 7) + 1
+            return 0.0
+        return max(0.0, (datetime.now() - t0).total_seconds() / 86400.0)
+
+    def weeks_played(self) -> int:
+        """从首次运行算起是第几周（第 1 周 = 头 7 天）。"""
+        return int(self.days_played() // 7) + 1
+
+    def time_slots(self) -> int:
+        """**只按时间**该给的格数（不含碎片提前买的）。"""
+        weeks = self.weeks_played()
+        return min(EQUIP_SLOTS, 1 + (weeks - 1) // SLOT_EVERY_WEEKS)
+
+    def bought_slots(self) -> int:
+        """已经用碎片提前买到的格数（存档被手改超了也夹回 0..5）。"""
+        return max(0, min(EQUIP_SLOTS, int(self.cfg.slot_boost or 0)))
+
+    def slots(self) -> int:
+        """总共能用几个装备槽 = 时间给的 + 碎片买的，封顶 ``EQUIP_SLOTS``。
+
+        ⚠️ 存档里存的是**买过的格数**（``cfg.slot_boost``），不是这个总数 ——
+        总数是时间的函数，把它存进存档就等于把时钟冻在写档那一刻，
+        日子再往后走也不动了。这条是 ``boost_slot`` 唯一容易写错的地方。
+        """
+        return min(EQUIP_SLOTS, self.time_slots() + self.bought_slots())
+
+    def next_slot_days(self) -> float | None:
+        """距离下一格**自然**解锁还有几天；时间已经给满 5 格就返回 ``None``。
+
+        买过的格不影响它 —— 它答的是"上一格什么时候自然来"，
+        不是"你现在能用几格"。界面靠它告诉玩家"这一格值不值得花碎片买"：
+        还剩一两天就自然到了，那 40 个碎片就是白花。
+        """
+        base = self.time_slots()
+        if base >= EQUIP_SLOTS:
+            return None
+        # base 格需要 days >= 7*SLOT_EVERY_WEEKS*(base-1)，故下一格在 days >= 7*S*base
+        return max(0.0, 7.0 * SLOT_EVERY_WEEKS * base - self.days_played())
 
     def equipped(self) -> list[str]:
         """在装备栏里的卡 id（已按槽位数截断，存档被手改超了也不会越界）。"""
@@ -485,6 +534,40 @@ class Album:
             return False
         self.equip(cid)
         return self.is_equipped(cid)
+
+    # ------------------------------------------------------------ 提前开槽
+
+    def boost_cost(self) -> int:
+        """提前开一格要多少个高级碎片。"""
+        return BOOST_COST_HIGH
+
+    def boost_block_reason(self) -> str:
+        """现在能不能用碎片提前开一格。空字符串 = 可以，否则是给人看的原因。
+
+        和 ``exchange_block_reason`` 同一个口径：**界面灰不灰只认这一处**，
+        别在按钮那边另写一遍（两处判定的症状就是"能点、点下去没反应"）。
+        """
+        if self.slots() >= EQUIP_SLOTS:
+            return f"装备槽已经全开了（{EQUIP_SLOTS} 格）"
+        if int(self.cfg.frag_high) < BOOST_COST_HIGH:
+            return f"还差 {BOOST_COST_HIGH - int(self.cfg.frag_high)} 个高级碎片"
+        return ""
+
+    def can_boost(self) -> bool:
+        return not self.boost_block_reason()
+
+    def boost_slot(self) -> bool:
+        """花高级碎片提前开一格装备槽。成了返回 ``True``。
+
+        **只动碎片，不动金币，也不占每周兑换额度**：
+        金币是这套经济唯一的上游（让它能买槽就长出正反馈环）；
+        而兑换额度管的是"用碎片换卡"，是另外一件事，不该被这件事扣掉。
+        """
+        if self.boost_block_reason():
+            return False
+        self.cfg.frag_high = int(self.cfg.frag_high) - BOOST_COST_HIGH
+        self.cfg.slot_boost = self.bought_slots() + 1
+        return True
 
     def bonus(self) -> float:
         """当前装备提供的金币加成比例（0.13 = +13%），已按硬顶截断。"""

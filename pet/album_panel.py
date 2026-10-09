@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (QButtonGroup, QFrame, QGridLayout, QHBoxLayout,
                                QWidget)
 
 from . import uitheme
-from .cards import COST, Card, TIERS
+from .cards import COST, EQUIP_SLOTS, Card, TIERS
 from .config import Config
 from .reveal import CardReveal
 
@@ -126,7 +126,7 @@ class AlbumPanel(QWidget):
         root.addLayout(self._build_pager())
         root.addWidget(self._rule())
         root.addLayout(self._build_gacha())
-        root.addWidget(self._frag_line())
+        root.addLayout(self._frag_line())
         root.addLayout(self._build_trades())
         root.addWidget(self._rule())
         root.addLayout(self._build_selected())
@@ -285,10 +285,33 @@ class AlbumPanel(QWidget):
         row.addWidget(self.convert, 0)
         return row
 
-    def _frag_line(self) -> QLabel:
+    def _frag_line(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+
         self.frags = QLabel("", self)
         self.frags.setFont(uitheme.ui_font(10, bold=True))
-        return self.frags
+
+        # 「提前开一格」：花高级碎片把下一格槽位买下来，不用等够周数。
+        # 它**不是**最优路径（一次开槽约等于放弃一次多兑换，换来的只有
+        # 两三个星期），定位是"给不想等的人一个台阶" —— 见
+        # ``cards.BOOST_COST_HIGH`` 的推导。按钮文字写的是"点下去会发生
+        # 什么"，和「仅看已有」那个开关一个规矩；到底值不值得买，靠
+        # tooltip 里的"还差几天自然解锁"让玩家自己判断。
+        self.boost = QPushButton("", self)
+        self.boost.setObjectName("chip")
+        self.boost.setFont(uitheme.ui_font(9))
+        self.boost.setFixedHeight(32)
+        self.boost.setMinimumWidth(140)
+        self.boost.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.boost.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.boost.clicked.connect(self._boost)
+
+        row.addWidget(self.frags, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addStretch(1)
+        row.addWidget(self.boost, 0, Qt.AlignmentFlag.AlignVCenter)
+        return row
 
     def _build_trades(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -462,6 +485,44 @@ class AlbumPanel(QWidget):
             self.result.setText("低级碎片 5:1 换到 1 个高级碎片")
         self.refresh()
 
+    def _refresh_boost(self) -> None:
+        """刷新「提前开一格」按钮：文案、能不能点、以及值不值得的提示。
+
+        tooltip 里那句"还差几天自然解锁"是这整个功能里最有用的一句话 ——
+        买一格的代价是固定的 40 个高级碎片，但它换来的时间**每天都在缩水**：
+        还剩 20 天时买是"提前三周"，还剩 2 天时买就是白扔 40 个碎片。
+        这个判断只有玩家能做，界面负责把数字摆出来。
+        """
+        album = self.album
+        cost = album.boost_cost()
+        reason = album.boost_block_reason()
+        self.boost.setText(f"提前开一格\n{cost} 高级碎片")
+        self.boost.setEnabled(not reason)
+
+        left = album.next_slot_days()
+        if left is None:
+            tip = f"{EQUIP_SLOTS} 格已经全开了，没有可买的了"
+        else:
+            want = album.time_slots() + 1
+            tip = (f"花 {cost} 个高级碎片，立刻多一格（第 {want} 格），"
+                   f"不用等它 {left:.0f} 天后自然解锁。")
+            if left <= 5.0:
+                tip = (f"⚠️ 第 {want} 格还有 {left:.1f} 天就自然解锁了，"
+                       f"现在花 {cost} 个高级碎片买等于白扔。")
+        if reason:
+            tip = f"{tip}\n（现在还开不了：{reason}）"
+        self.boost.setToolTip(tip)
+
+    def _boost(self) -> None:
+        """花高级碎片提前开一格装备槽。"""
+        cost = self.album.boost_cost()
+        if self.pet.boost_slot():
+            self.result.setText(
+                f"用 {cost} 个高级碎片提前开了一格（现在 {self.album.slots()} 格）")
+        else:
+            self.result.setText(f"开不了：{self.album.boost_block_reason()}")
+        self.refresh()
+
     def _toggle_equip(self) -> None:
         """装上 / 卸下选中的卡。
 
@@ -575,6 +636,7 @@ class AlbumPanel(QWidget):
         self.gacha.setEnabled(album.can_pull())
 
         self.frags.setText(f"低级碎片 {self.cfg.frag_low}　·　高级碎片 {self.cfg.frag_high}")
+        self._refresh_boost()
         room = album.low_convert_capacity()
         self.convert.setText(
             f"低换高 5:1\n本周还可换 {room} 次")

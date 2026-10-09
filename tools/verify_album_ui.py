@@ -172,6 +172,49 @@ def main() -> int:
     check("切回整本图鉴", len(panel._cards) == all_total
           and not panel.cfg.album_owned_only)
 
+    print("\n[4c] 提前开一格（v2.7.0：花高级碎片，不用等够周数）")
+    from pet.cards import BOOST_COST_HIGH
+    panel.cfg.frag_high = 0
+    panel.cfg.slot_boost = 0
+    panel.cfg.launched_at = datetime.now().strftime(STAMP_FMT)
+    panel.refresh()
+    check("按钮上写着成本", str(BOOST_COST_HIGH) in panel.boost.text(),
+          panel.boost.text().replace("\n", " / "))
+    check("碎片不够时按钮是灰的", panel.boost.isEnabled() is False)
+    check("tooltip 说清还差多少",
+          f"还差 {BOOST_COST_HIGH} 个高级碎片" in panel.boost.toolTip(),
+          panel.boost.toolTip().replace("\n", " ┃ "))
+
+    # 快自然解锁时要主动劝退 —— 这是整个功能里最有用的一句提示：
+    # 代价是固定的 40 个碎片，换来的时间却每天都在缩水。
+    panel.cfg.frag_high = 999
+    panel.cfg.launched_at = (datetime.now() - timedelta(days=20)).strftime(STAMP_FMT)
+    panel.refresh()
+    left = panel.album.next_slot_days()
+    check("第 20 天：离自然解锁只剩 1 天左右",
+          left is not None and left < 1.5, f"{left:.2f}")
+    check("这时候按钮反而是可点的（判断权在玩家，界面只摆数字）",
+          panel.boost.isEnabled())
+    check("tooltip 主动劝退（说这是白扔）", "白扔" in panel.boost.toolTip(),
+          panel.boost.toolTip().replace("\n", " ┃ "))
+    panel.grab().save(str(out_dir / "卡册_提前开一格.png"))
+
+    # 回到"还早得很"的状态，真买一次
+    panel.cfg.launched_at = datetime.now().strftime(STAMP_FMT)
+    panel.cfg.frag_high = BOOST_COST_HIGH
+    panel.refresh()
+    check("碎片够了按钮就可点", panel.boost.isEnabled())
+    before_slots = panel.album.slots()
+    panel._boost()
+    check("点一下就用掉了 40 个高级碎片", panel.cfg.frag_high == 0,
+          f"{panel.cfg.frag_high}")
+    check("槽位真的多了一格", panel.album.slots() == before_slots + 1,
+          f"{before_slots} → {panel.album.slots()}")
+    check("结果栏写清了刚才发生了什么", "提前开了一格" in panel.result.text(),
+          panel.result.text())
+    check("存档里记的是「买过 1 格」", panel.cfg.slot_boost == 1,
+          f"{panel.cfg.slot_boost}")
+
     print("\n[5] 装备后的徽章栏")
     legendary = pet.album.cards_of("传说")
     for card in legendary[:3]:

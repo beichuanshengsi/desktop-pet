@@ -113,6 +113,11 @@ class Config:
     frag_high: int = 0
     #: 装备栏：装着的卡 id 列表。槽位数按"第几周"解锁，见 ``cards.Album.slots``。
     equipped: list[str] = field(default_factory=list)
+    #: 用高级碎片**提前**买到的装备槽数（见 ``cards.Album.boost_slot``）。
+    #: ⚠️ 存的是"买过几格"而**不是"现在有几格"** —— 后者是时间的函数
+    #: （``1 + 第几周//3``），存进去就等于把时钟冻结在写档那一刻。
+    #: 总格数永远是 ``min(5, 时间给的 + 这里买的)``。
+    slot_boost: int = 0
     #: 当前的周标识（``cards.week_stamp()`` 的输出，形如 ``2026-W41``）。
     #: 和它不相等就说明跨周了，周额度要清零。
     week_stamp: str = ""

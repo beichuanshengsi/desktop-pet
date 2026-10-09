@@ -553,6 +553,13 @@ class PetWindow(QWidget):
             self.cfg.save()
         return ok
 
+    def boost_slot(self) -> bool:
+        """花高级碎片提前开一格装备槽（见 ``cards.Album.boost_slot``）。"""
+        ok = self.album.boost_slot()
+        if ok:
+            self.cfg.save()
+        return ok
+
     def _persist(self) -> None:
         """定期落盘：位置 + 养成状态 + 背包。
 
