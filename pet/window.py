@@ -46,10 +46,12 @@ from PySide6.QtWidgets import QMenu, QWidget
 from . import facing as facinglib
 from . import menu as menulib
 from . import uitheme
+from .album_panel import AlbumPanel
 from .anim import Animator
 from .assets import AssetBank
 from .bag import Bag
 from .behavior import Brain, FPS, State
+from .cards import Album, Pull, Trade
 from .config import Config, hours_since, now_stamp, today_stamp
 from .panel import BagPanel
 from .paths import pet_asset_dir
@@ -129,6 +131,11 @@ class PetWindow(QWidget):
         # 背包：小卖部买来的东西先存这儿。和养成状态一样，读存档、定期写回。
         self.bag = Bag(self.cfg.inventory)
 
+        # 卡册：抽卡 / 碎片 / 装备栏。和背包一样属于"用户操作的账本"，
+        # 状态直接挂在 ``cfg`` 上（理由见 ``pet/cards.py`` 开头）——
+        # 于是它天然被 ``_persist`` 每 3 秒写一次，不用另铺一条同步的路。
+        self.album = Album(self.cfg)
+
         # 番茄钟。纯计时，到点发信号。
         self.pomodoro = Pomodoro()
 
@@ -180,6 +187,8 @@ class PetWindow(QWidget):
         # ``QApplication`` 已经在跑 —— 而这个窗口在测试里是能被造出来的，
         # 构造期去 new 一个顶层窗口会让无界面测试变脆。
         self._panel: BagPanel | None = None
+        #: 卡册窗口，同 ``_panel`` 的懒建规则。
+        self._album_panel: AlbumPanel | None = None
 
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
@@ -434,7 +443,67 @@ class PetWindow(QWidget):
         """
         if self._panel is not None and self._panel.isVisible():
             self._panel.refresh()
+        if self._album_panel is not None and self._album_panel.isVisible():
+            self._album_panel.refresh()
         super().leaveEvent(event)
+
+    # ================================================================ 卡册
+
+    def open_album(self) -> None:
+        """打开（或叫回）卡册窗口。懒建、复用 —— 理由同 ``open_panel``。"""
+        self.album.refresh_week()
+        if self._album_panel is None:
+            self._album_panel = AlbumPanel(self, self.cfg)
+        self._album_panel.center_on(self._screen_available())
+        self._album_panel.show()
+        self._album_panel.raise_()
+        self._album_panel.activateWindow()
+        self._album_panel.refresh()
+
+    def pull_card(self) -> Pull | None:
+        """抽一次卡。金币够不够、发哪张卡全在 ``Album.pull`` 里判定，
+        面板只转发 —— 和 ``buy`` / ``use_item`` 是同一条规矩。
+
+        抽完**立刻落盘**：桌宠是被任务管理器结束掉也不奇怪的常驻程序，
+        抽到的卡要是等 3 秒的定时器才写，中间被关掉就白抽了。
+        """
+        self.album.refresh_week()
+        pull = self.album.pull()
+        if pull is not None:
+            self.cfg.save()
+        return pull
+
+    def dissolve_card(self, cid: str) -> tuple[bool, int, str]:
+        ok, amount, kind = self.album.dissolve(cid)
+        if ok:
+            self.cfg.save()
+        return ok, amount, kind
+
+    def exchange_card(self, tier: str) -> Trade:
+        self.album.refresh_week()
+        trade = self.album.exchange(tier)
+        if trade.ok:
+            self.cfg.save()
+        return trade
+
+    def convert_low(self, times: int = 1) -> int:
+        self.album.refresh_week()
+        got = self.album.convert_low(times)
+        if got:
+            self.cfg.save()
+        return got
+
+    def equip_card(self, cid: str) -> bool:
+        ok = self.album.equip(cid)
+        if ok:
+            self.cfg.save()
+        return ok
+
+    def unequip_card(self, cid: str) -> bool:
+        ok = self.album.unequip(cid)
+        if ok:
+            self.cfg.save()
+        return ok
 
     def _persist(self) -> None:
         """定期落盘：位置 + 养成状态 + 背包。
@@ -819,6 +888,9 @@ class PetWindow(QWidget):
 
         menulib.add_vitals(menu, self.vitals, self.cfg)
         menu.addSeparator()
+        # 顶部一排装备徽章 + 卡册入口。卡池缺失时这一块整个不显示
+        # （见 ``menu.add_album``）—— 留一个点了没反应的入口只会让人困惑。
+        menulib.add_album(menu, self, self.cfg)
         menulib.add_interactions(menu, self)
         menulib.add_shop(menu, self, self.cfg)
         menulib.add_bag(menu, self, self.cfg)
@@ -911,6 +983,8 @@ class PetWindow(QWidget):
         # 屏幕上还浮着一块背包面板"。
         if self._panel is not None:
             self._panel.close()
+        if self._album_panel is not None:
+            self._album_panel.close()
         self.cfg.pos_x, self.cfg.pos_y = int(self.body.x), int(self.body.y)
         # 记下"我是什么时候走的" —— 下次启动靠它算离线衰减（见 _load_vitals）。
         # 位置、养成状态、背包也要顺手存一次，否则最后 3 秒的变动会白丢。

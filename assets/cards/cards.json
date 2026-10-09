@@ -1,0 +1,531 @@
+{
+ "version": 1,
+ "tiers": [
+  "传说",
+  "史诗",
+  "稀有",
+  "普通"
+ ],
+ "cards": [
+  {
+   "id": "c009",
+   "file": "ke_ai_xian_tiao_108_可爱线条小狗宠物卡通插画l烫画电子手账P.png",
+   "tier": "传说"
+  },
+  {
+   "id": "c054",
+   "file": "ke_ai_xian_tiao_90_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "传说"
+  },
+  {
+   "id": "c057",
+   "file": "ke_ai_xian_tiao_93_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "传说"
+  },
+  {
+   "id": "c059",
+   "file": "ke_ai_xian_tiao_95_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "传说"
+  },
+  {
+   "id": "c064",
+   "file": "xian_tiao_xiao_26_线条狗28.png",
+   "tier": "传说"
+  },
+  {
+   "id": "c079",
+   "file": "xian_tiao_xiao_5402_线条小狗16.png",
+   "tier": "传说"
+  },
+  {
+   "id": "c094",
+   "file": "xian_tiao_xiao_5417_线条小狗23.png",
+   "tier": "传说"
+  },
+  {
+   "id": "c001",
+   "file": "ke_ai_xian_tiao_100_可爱线条小狗宠物卡通插画l烫画电子手账P.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c018",
+   "file": "ke_ai_xian_tiao_44_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c025",
+   "file": "ke_ai_xian_tiao_51_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c029",
+   "file": "ke_ai_xian_tiao_55_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c035",
+   "file": "ke_ai_xian_tiao_62_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c038",
+   "file": "ke_ai_xian_tiao_66_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c040",
+   "file": "ke_ai_xian_tiao_68_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c043",
+   "file": "ke_ai_xian_tiao_71_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c051",
+   "file": "ke_ai_xian_tiao_86_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c055",
+   "file": "ke_ai_xian_tiao_91_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c065",
+   "file": "xian_tiao_xiao_27_线条狗16.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c066",
+   "file": "xian_tiao_xiao_2_线条狗29.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c067",
+   "file": "xian_tiao_xiao_5390_线条小狗2.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c085",
+   "file": "xian_tiao_xiao_5408_线条小狗26.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c086",
+   "file": "xian_tiao_xiao_5409_线条小狗10.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c088",
+   "file": "xian_tiao_xiao_5411_线条小狗.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c090",
+   "file": "xian_tiao_xiao_5413_线条小狗22.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c098",
+   "file": "xian_tiao_xiao_5468_线条小狗.png",
+   "tier": "史诗"
+  },
+  {
+   "id": "c004",
+   "file": "ke_ai_xian_tiao_103_可爱线条小狗宠物卡通插画l烫画电子手账P.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c008",
+   "file": "ke_ai_xian_tiao_107_可爱线条小狗宠物卡通插画l烫画电子手账P.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c010",
+   "file": "ke_ai_xian_tiao_34_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c011",
+   "file": "ke_ai_xian_tiao_36_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c012",
+   "file": "ke_ai_xian_tiao_38_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c015",
+   "file": "ke_ai_xian_tiao_41_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c016",
+   "file": "ke_ai_xian_tiao_42_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c019",
+   "file": "ke_ai_xian_tiao_45_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c022",
+   "file": "ke_ai_xian_tiao_48_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c033",
+   "file": "ke_ai_xian_tiao_60_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c039",
+   "file": "ke_ai_xian_tiao_67_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c041",
+   "file": "ke_ai_xian_tiao_69_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c046",
+   "file": "ke_ai_xian_tiao_80_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c048",
+   "file": "ke_ai_xian_tiao_83_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c049",
+   "file": "ke_ai_xian_tiao_84_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c052",
+   "file": "ke_ai_xian_tiao_88_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c053",
+   "file": "ke_ai_xian_tiao_89_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c056",
+   "file": "ke_ai_xian_tiao_92_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c062",
+   "file": "ke_ai_xian_tiao_98_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c063",
+   "file": "ke_ai_xian_tiao_99_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c071",
+   "file": "xian_tiao_xiao_5394_线条小狗9.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c075",
+   "file": "xian_tiao_xiao_5398_线条小狗14.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c076",
+   "file": "xian_tiao_xiao_5399_线条小狗13.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c080",
+   "file": "xian_tiao_xiao_5403_线条小狗19.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c087",
+   "file": "xian_tiao_xiao_5410_线条小狗8.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c105",
+   "file": "xian_tiao_xiao_6009_线条小狗.png",
+   "tier": "稀有"
+  },
+  {
+   "id": "c002",
+   "file": "ke_ai_xian_tiao_101_可爱线条小狗宠物卡通插画l烫画电子手账P.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c003",
+   "file": "ke_ai_xian_tiao_102_可爱线条小狗宠物卡通插画l烫画电子手账P.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c005",
+   "file": "ke_ai_xian_tiao_104_可爱线条小狗宠物卡通插画l烫画电子手账P.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c006",
+   "file": "ke_ai_xian_tiao_105_可爱线条小狗宠物卡通插画l烫画电子手账P.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c007",
+   "file": "ke_ai_xian_tiao_106_可爱线条小狗宠物卡通插画l烫画电子手账P.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c013",
+   "file": "ke_ai_xian_tiao_39_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c014",
+   "file": "ke_ai_xian_tiao_40_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c017",
+   "file": "ke_ai_xian_tiao_43_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c020",
+   "file": "ke_ai_xian_tiao_46_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c021",
+   "file": "ke_ai_xian_tiao_47_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c023",
+   "file": "ke_ai_xian_tiao_49_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c026",
+   "file": "ke_ai_xian_tiao_52_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c027",
+   "file": "ke_ai_xian_tiao_53_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c028",
+   "file": "ke_ai_xian_tiao_54_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c030",
+   "file": "ke_ai_xian_tiao_56_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c031",
+   "file": "ke_ai_xian_tiao_57_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c032",
+   "file": "ke_ai_xian_tiao_59_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c034",
+   "file": "ke_ai_xian_tiao_61_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c036",
+   "file": "ke_ai_xian_tiao_64_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c037",
+   "file": "ke_ai_xian_tiao_65_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c042",
+   "file": "ke_ai_xian_tiao_70_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c044",
+   "file": "ke_ai_xian_tiao_75_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c045",
+   "file": "ke_ai_xian_tiao_76_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c047",
+   "file": "ke_ai_xian_tiao_81_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c050",
+   "file": "ke_ai_xian_tiao_85_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c058",
+   "file": "ke_ai_xian_tiao_94_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c060",
+   "file": "ke_ai_xian_tiao_96_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c061",
+   "file": "ke_ai_xian_tiao_97_可爱线条小狗宠物卡通插画l烫画电子手账PN.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c068",
+   "file": "xian_tiao_xiao_5391_线条小狗5.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c069",
+   "file": "xian_tiao_xiao_5392_线条小狗3.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c070",
+   "file": "xian_tiao_xiao_5393_线条小狗6.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c073",
+   "file": "xian_tiao_xiao_5396_线条小狗12.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c074",
+   "file": "xian_tiao_xiao_5397_线条小狗21.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c077",
+   "file": "xian_tiao_xiao_5400_线条小狗15.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c078",
+   "file": "xian_tiao_xiao_5401_线条小狗18.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c081",
+   "file": "xian_tiao_xiao_5404_线条小狗17.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c082",
+   "file": "xian_tiao_xiao_5405_线条小狗20.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c083",
+   "file": "xian_tiao_xiao_5406_线条小狗27.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c084",
+   "file": "xian_tiao_xiao_5407_线条小狗24.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c089",
+   "file": "xian_tiao_xiao_5412_线条小狗28.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c091",
+   "file": "xian_tiao_xiao_5414_线条小狗7.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c092",
+   "file": "xian_tiao_xiao_5415_线条小狗25.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c093",
+   "file": "xian_tiao_xiao_5416_线条小狗33.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c095",
+   "file": "xian_tiao_xiao_5465_线条小狗3.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c096",
+   "file": "xian_tiao_xiao_5466_线条小狗7.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c097",
+   "file": "xian_tiao_xiao_5467_线条小狗2.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c099",
+   "file": "xian_tiao_xiao_5469_线条小狗5.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c100",
+   "file": "xian_tiao_xiao_5477_线条小狗.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c102",
+   "file": "xian_tiao_xiao_5510_线条小狗.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c103",
+   "file": "xian_tiao_xiao_5512_线条小狗头像免抠图片.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c104",
+   "file": "xian_tiao_xiao_5562_线条小狗.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c106",
+   "file": "xian_tiao_xiao_6105_线条小狗简笔画卡通免扣.png",
+   "tier": "普通"
+  },
+  {
+   "id": "c107",
+   "file": "xian_tiao_xiao_jue_jiang_1_倔强鸭子和小胖发-线条小狗.png",
+   "tier": "普通"
+  }
+ ]
+}

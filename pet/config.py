@@ -97,6 +97,32 @@ class Config:
     #: 不用每次重新滚一遍 25 分钟。默认值来自 ``pet/pomodoro.py`` 的常用档位。
     pomodoro_seconds: float = 1500.0
 
+    # ---------------- 卡册与抽卡（见 pet/cards.py）
+    #
+    # 这一组字段的读写规则都在 ``pet/cards.py`` 的 ``Album`` 里，本类只负责存。
+    # 之所以不另做一个独立的 ``album.json``：桌宠是"被任务管理器结束掉也不奇怪"
+    # 的常驻程序，多一份存档就多一处"最后几秒的改动白丢"的机会。
+
+    #: 卡册：卡 id -> 拥有张数。**重复的卡留在册里不自动变碎片** ——
+    #: 分不分解、分解哪张，由用户在卡册里自己决定。
+    cards: dict[str, int] = field(default_factory=dict)
+    #: 低级碎片（普通/稀有重复卡分解来的）。
+    frag_low: int = 0
+    #: 高级碎片（史诗/传说重复卡分解来的，以及低级碎片 5:1 换来的）。
+    #: 两条货币分开，是为了让"换一张传说"必须真的攒够高级碎片。
+    frag_high: int = 0
+    #: 装备栏：装着的卡 id 列表。槽位数按"第几周"解锁，见 ``cards.Album.slots``。
+    equipped: list[str] = field(default_factory=list)
+    #: 当前的周标识（``cards.week_stamp()`` 的输出，形如 ``2026-W41``）。
+    #: 和它不相等就说明跨周了，周额度要清零。
+    week_stamp: str = ""
+    #: 本周各档已兑换次数：档位 -> 次数。
+    weekly_used: dict[str, int] = field(default_factory=dict)
+    #: 本周"低换高"已经吃掉的低级碎片数（上限见 ``cards.LOW_TO_HIGH_CAP``）。
+    low_convert_used: int = 0
+    #: 兑换保底计数：档位 -> 连续撞重复了几次，见 ``cards.GUARD``。
+    dup_streak: dict[str, int] = field(default_factory=dict)
+
     # ---------------- 读写
 
     @classmethod
@@ -130,6 +156,11 @@ class Config:
                     # （``bag.normalize`` 会剔掉下架商品、负数、非整数），
                     # 这里只挡掉类型完全不对的情况（被手改成了一串数字）。
                     v = v if isinstance(v, dict) else {}
+                elif isinstance(cur, list):
+                    # 列表字段（目前只有 ``equipped``）。元素只收字符串 ——
+                    # 一个手打错的数字混进去，"装备了 c001 和 3"这种状态
+                    # 在卡册里没法画出来，也没法卸掉。
+                    v = [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
             except (TypeError, ValueError):
                 continue
             setattr(cfg, k, v)

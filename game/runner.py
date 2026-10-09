@@ -530,7 +530,7 @@ class Runner(GameWindow):
         self.label_sub.setText(
             f"最远 {self.cfg.best_runner}    速度档位 {self.tier + 1}    "
             f"撞上时 {self.speed:.0f} px/s    "
-            f"+{earned} 金币（共 {self.cfg.coins}）")
+            f"+{earned} 金币{self.coins_note()}（共 {self.cfg.coins}）")
         self.overlay.show()
         self.overlay.raise_()
         self._center_overlay()

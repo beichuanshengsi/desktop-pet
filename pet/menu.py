@@ -36,8 +36,9 @@ from dataclasses import dataclass
 from typing import Callable, Iterable, Protocol
 
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QMenu, QWidgetAction
 
+from .badge_bar import BadgeBar
 from .config import Config
 from .pomodoro import describe
 from .vitals import LABEL as VITALS_LABEL
@@ -184,6 +185,36 @@ def add_interactions(menu: QMenu, pet) -> None:
     plan = pet.feed_plan()
     feed = menu.addAction(feed_text(plan), pet.feed)
     feed.setEnabled(plan is not None)
+
+
+def add_album(menu: QMenu, pet, cfg: Config) -> list[QAction]:
+    """卡册那一块：顶上一条**装备徽章栏**，下面一行进卡册的入口。
+
+    徽章栏用 ``QWidgetAction`` 塞进普通 ``QMenu`` —— 这是 Qt 官方支持的
+    做法（菜单里放自定义控件），所以不用为它单独开一个窗口。
+    **只展示、不可点**：装与卸都在卡册里做，免得"能不能装"的判定有两份
+    （见 ``pet/badge_bar.py`` 的说明）。
+
+    放菜单顶部、紧跟着状态行：装备加成是"我这局能挣多少"的直接答案，
+    和状态行／金币是同一类信息，理应挨着。
+
+    卡池是空的时候（用户的素材目录里没有 ``cards.json``）**整块不显示** ——
+    菜单里留一个点了没反应的"卡册"，比没有这个入口更让人困惑。
+    """
+    album = getattr(pet, "album", None)
+    if album is None or not album.pool:
+        return []
+
+    holder = QWidgetAction(menu)
+    holder.setDefaultWidget(BadgeBar(album, menu))
+    menu.addAction(holder)
+
+    entry = menu.addAction(
+        f"卡册（{album.owned_kinds()} / {album.total_kinds()}）　"
+        f"碎片 {cfg.frag_low} 低 + {cfg.frag_high} 高",
+        pet.open_album)
+    menu.addSeparator()
+    return [entry]
 
 
 def add_vitals(menu: QMenu, vitals, cfg: Config) -> list[QAction]:

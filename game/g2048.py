@@ -43,6 +43,9 @@ from PySide6.QtGui import QColor, QFontMetricsF, QPainter, QPen
 from game.common import (BG_2048, HUD_H, W, H, GameWindow, load_background,
                          measure_zone_widest, paint_hud_bar, ui_font, zone_spans)
 from pet.assets import AssetBank
+#: 装备加成。这一款**不跟 ``coins_for`` 那把尺子**（自己按最大格折算），
+#: 但加成必须跟另外三款共用同一个函数 —— 否则会出现"打 2048 吃不到装备加成"。
+from pet.cards import coins_with_bonus
 
 # ================================================================ 规则（纯函数）
 #
@@ -430,7 +433,8 @@ class Game2048(GameWindow):
         if self.score > self.cfg.best_2048:
             self.cfg.best_2048 = self.score
             self.cfg.save()
-        earned = coins_for_tile(max_tile(self.grid))
+        earned, self._bonus_rate = coins_with_bonus(
+            self.cfg, coins_for_tile(max_tile(self.grid)))
         if earned:
             self.cfg.coins += earned
             self.cfg.save()
@@ -441,7 +445,7 @@ class Game2048(GameWindow):
             else f"推不动了　得分 {self.score}")
         self.label_sub.setText(
             f"最大块 {max_tile(self.grid)}    最高分 {best}    "
-            f"+{earned} 金币（共 {self.cfg.coins}）")
+            f"+{earned} 金币{self.coins_note()}（共 {self.cfg.coins}）")
         self.overlay.show()
         self.overlay.raise_()
         self._center_overlay()

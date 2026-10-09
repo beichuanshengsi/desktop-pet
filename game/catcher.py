@@ -631,7 +631,7 @@ class CatchGame(GameWindow):
         self.label_sub.setText(
             f"最高分 {self.cfg.best_catch}    接住 {self.caught} 只    "
             f"最长连击 {self.best_combo}    撑过 {self.survived:.0f} 秒    "
-            f"+{earned} 金币（共 {self.cfg.coins}）")
+            f"+{earned} 金币{self.coins_note()}（共 {self.cfg.coins}）")
         self.overlay.show()
         self.overlay.raise_()
         self._center_overlay()

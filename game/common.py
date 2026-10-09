@@ -24,6 +24,10 @@ from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 #: （桌宠自己也要开对话框和面板，放在 game 里会逼出 pet → game 的循环依赖）。
 #: 这里转出来是为了两个游戏的 import 一行都不用改。
 from pet.uitheme import FONT_STACK, ui_font            # noqa: F401
+#: 装备加成。**四个游戏都从这一个函数取** —— 加成规则只写在 ``pet/cards.py``
+#: 一份，各游戏自己算一份的话，迟早出现"打弹跳得分能吃到加成、打 2048 吃不到"，
+#: 而玩家一定会挑那个更划算的玩。
+from pet.cards import coins_with_bonus
 
 # ---------------------------------------------------------------- 版面
 
@@ -258,6 +262,9 @@ class GameWindow(QWidget):
         self.pops: list = []           # 粒子反馈，两个游戏各是一种，都只有 update(dt)->bool
         self.score = 0
         self.over = False
+        #: 本局结算时用到的装备加成比例（0.13 = +13%）。给结算浮层那句
+        #: "（含装备 +13%）"用 —— 不加这一行，用户根本看不出装备起没起作用。
+        self._bonus_rate = 0.0
 
         self._build_overlay()
 
@@ -347,19 +354,35 @@ class GameWindow(QWidget):
         self.label_title.setText(self.OVERLAY_TITLE)
 
     def _award_coins(self) -> int:
-        """把本局得分折成金币记进存档，返回这一局挣了多少。
+        """把本局得分折成金币记进存档，返回这一局挣了多少（**含装备加成**）。
 
         放底座里、由 ``_finish()`` 调，而不是各游戏各写一遍：汇率只有一个
         （``coins_for``），两个游戏必须用同一把尺子。
 
         **只在结算时给**，中途关掉窗口不给 —— 否则"打到一半看要输了就关窗"
         会变成一种比认真打完更划算的操作。
+
+        装备加成在这里乘上去（``coins_with_bonus``），而不是去改 ``coins_for``：
+        汇率是"分 → 金币"的换算，加成是"玩家资产带来的额外收益"。两件事混在
+        一起的话，"卸下装备之后汇率是多少"就说不清了，而且
+        ``coins_for`` 是个纯函数，被测试和 HUD 到处引用。
         """
-        earned = coins_for(self.score)
+        base = coins_for(self.score)
+        earned, self._bonus_rate = coins_with_bonus(self.cfg, base)
         if earned:
             self.cfg.coins += earned
             self.cfg.save()
         return earned
+
+    def coins_note(self) -> str:
+        """结算文案里那句"（含装备 +13%）"。没吃到加成时返回空串。
+
+        单独抽出来，是因为四个游戏的结算文案长得都不一样（2048 那款还要报
+        最大格子），但**加成的说法必须一致** —— 各写一遍迟早有一处忘了改，
+        而症状是"某个游戏看起来没吃加成"。
+        """
+        rate = float(getattr(self, "_bonus_rate", 0.0))
+        return f"（含装备 +{rate * 100:.0f}%）" if rate > 0 else ""
 
     def _center_overlay(self) -> None:
         center_overlay(self.overlay, W, H)

@@ -82,6 +82,7 @@ class AssetKind:
 ASSET_KINDS: tuple[AssetKind, ...] = (
     AssetKind("pet", "宠物贴图", user_dir="custom_pet"),
     AssetKind("game", "小游戏素材", user_dir="game"),
+    AssetKind("cards", "卡册素材", user_dir="cards"),
     AssetKind("sfx", "音效"),
     AssetKind("fonts", "字体"),
 )
@@ -135,6 +136,15 @@ def game_asset_dir() -> Path:
     缺哪一套就只让那一套退回代码画的占位形象（炸弹现在就是占位），互不影响。
     """
     return resolve_asset_dir("game")
+
+
+def card_asset_dir() -> Path:
+    """卡册素材目录：``cards.json`` + ``thumb/<id>.png``。
+
+    和宠物贴图一样有用户覆盖层（``<数据目录>/cards/``）：换一整套卡池时，
+    只要把新的 ``cards.json`` 和缩略图丢进去就行，不用动程序目录。
+    """
+    return resolve_asset_dir("cards")
 
 
 def config_path() -> Path:

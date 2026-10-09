@@ -551,7 +551,7 @@ class MiniGame(GameWindow):
             f"最高分 {self.cfg.best_score}    通过 {self.round_no} 轮    "
             f"最高 {self.best_combo} 连（×{combo_mult(self.best_combo)}）    "
             f"道具 {self.picked} 个    "
-            f"+{earned} 金币（共 {self.cfg.coins}）")
+            f"+{earned} 金币{self.coins_note()}（共 {self.cfg.coins}）")
         self.overlay.show()
         self.overlay.raise_()
         self._center_overlay()
