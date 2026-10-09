@@ -38,6 +38,7 @@ from typing import Callable, Iterable, Protocol
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QWidgetAction
 
+from . import kids as kidslib
 from .badge_bar import BadgeBar
 from .config import Config
 from .pomodoro import describe
@@ -389,6 +390,30 @@ def add_game_menu(menu: QMenu, games: Iterable[tuple[str, str, str]],
         # 把 k 绑成默认参数：不这样写的话闭包捕获的是循环变量本身，
         # 所有菜单项最后都会发出同一个标识（Qt 里最容易踩的一类坑）
         sub.addAction(label, lambda _=False, k=game_id: emit(k))
+    return sub
+
+
+def add_kids(menu: QMenu, pet, cfg: Config) -> QMenu:
+    """「幼儿模式」子菜单：把桌面锁起来，只留桌宠给小朋友玩（见 ``pet/kids.py``）。
+
+    为什么是两个平级入口 + 一个改密码，而不是"开启"加一个严格/安全的勾选：
+    这两档的**代价不一样**（严格档要装低级键盘钩子，杀软可能对打包后的 exe 报警），
+    而用户是按"今天要锁到多死"现场决定的，不是按"设置"。选完就进，
+    不用先开模式再回头改设置。
+
+    这一块**只在桌宠右键菜单里有**：托盘菜单是在任务栏上点出来的，
+    而任务栏正是这个模式要挡住的地方 —— 摆在托盘里等于自己拆自己的台。
+    """
+    sub = menu.addMenu("幼儿模式（小朋友玩电脑时用）")
+    sub.addAction("开启 · 安全（只锁鼠标）", lambda: pet.request_kids.emit("safe"))
+    sub.addAction("开启 · 严格（连 Win / Alt+Tab 一起锁）",
+                  lambda: pet.request_kids.emit("strict"))
+    if not kidslib.valid_passcode(cfg.kids_passcode):
+        # 没设密码时把话说明白：点了不会没反应，会先让你设一个
+        hint = sub.addAction("还没设退出密码 —— 第一次开启时会让你设一个")
+        hint.setEnabled(False)
+    sub.addSeparator()
+    sub.addAction("换退出密码…", lambda: pet.request_kids.emit("passcode"))
     return sub
 
 

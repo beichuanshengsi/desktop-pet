@@ -17,6 +17,7 @@ import random
 import sys
 import tempfile
 import time
+from dataclasses import fields as dc_fields
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")     # 必须在 Qt 之前设
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (QApplication, QMenu,        # noqa: E402
 
 from pet import __version__                              # noqa: E402
 from pet import facing                                   # noqa: E402
+from pet import kids as kidslib                          # noqa: E402
 from pet import menu as menulib                          # noqa: E402
 from pet.assets import STATES as ALL_STATES               # noqa: E402
 from pet.assets import DEFAULT_SET, AssetBank, default_set_files  # noqa: E402
@@ -40,6 +42,9 @@ from pet.bag import Bag                                   # noqa: E402
 from pet.behavior import Brain, State                     # noqa: E402
 from pet.behavior import FPS as BFPS                      # noqa: E402
 from pet.config import Config, today_stamp
+from pet.keyblock import (ALWAYS_BLOCKED, CHORD_BLOCKED,   # noqa: E402
+                          VK_APPS, VK_ESCAPE, VK_F4, VK_LWIN, VK_RWIN,
+                          VK_SPACE, VK_TAB, KeyBlocker, should_block)
 from pet.paths import game_asset_dir, pet_asset_dir                     # noqa: E402
 from pet.physics import (FLING_MAX, FLING_MIN, Motion, VelocitySampler,  # noqa: E402
                          clamp_fling)
@@ -2402,6 +2407,186 @@ def main() -> int:
     check("狗粮 2048 HUD：分配出去的槽位本身就不重叠（比墨迹不叠更严）",
           not overlapping_zones(gslots),
           " ".join(f"{n}{v}" for n, v in sorted(gslots.items())))
+
+    # ---------------------------------------------------------- 幼儿模式
+    section("幼儿模式")
+    # 这一节验的是"到底锁得住什么"。窗口层次本身（遮罩盖住桌面、桌宠压在遮罩
+    # 之上、任务栏被盖住）离屏环境里验不出真假 —— 那部分只能真机上肉眼看，
+    # 步骤写在 docs/幼儿模式.md 的"怎么验收"一节。
+    check("吞掉的键：左 Win", should_block(VK_LWIN))
+    check("吞掉的键：右 Win", should_block(VK_RWIN))
+    check("吞掉的键：菜单键", should_block(VK_APPS))
+    check("吞掉的键：Alt+Tab", should_block(VK_TAB, alt=True))
+    check("吞掉的键：Alt+F4", should_block(VK_F4, alt=True))
+    check("吞掉的键：Alt+Esc", should_block(VK_ESCAPE, alt=True))
+    check("吞掉的键：Ctrl+Esc（开始菜单）", should_block(VK_ESCAPE, ctrl=True))
+    check("吞掉的键：Ctrl+Shift+Esc（任务管理器）",
+          should_block(VK_ESCAPE, ctrl=True, shift=True))
+    check("吞掉的键：Alt+Space（系统菜单里有关闭）",
+          should_block(VK_SPACE, alt=True))
+    # 反过来更要紧：正常的打字和小游戏操作一律不能吃 ——
+    # 锁得太死会连"玩"都玩不了，那这个模式就没有意义了
+    check("放行的键：单独 Tab", not should_block(VK_TAB))
+    check("放行的键：单独 Esc", not should_block(VK_ESCAPE))
+    check("放行的键：单独 F4", not should_block(VK_F4))
+    check("放行的键：单独空格", not should_block(VK_SPACE))
+    check("放行的键：Shift+Tab", not should_block(VK_TAB, shift=True))
+    check("放行的键：字母 A", not should_block(0x41))
+    check("放行的键：数字 1", not should_block(0x31))
+    check("放行的键：Alt+A（只是普通组合键，不是切走）",
+          not should_block(0x41, alt=True))
+    check("键表本身没写错类型",
+          bool(ALWAYS_BLOCKED)
+          and all(isinstance(v, int) for v in ALWAYS_BLOCKED)
+          and all(isinstance(k, int) and mods for k, mods in CHORD_BLOCKED))
+
+    check("密码必须是 4 位半角数字",
+          kidslib.valid_passcode("1234")
+          and not kidslib.valid_passcode("123")
+          and not kidslib.valid_passcode("12345")
+          and not kidslib.valid_passcode("12a4")
+          and not kidslib.valid_passcode("")
+          and not kidslib.valid_passcode(None))
+    check("全角数字不算数（小键盘上敲不出来，存了就是个坑）",
+          not kidslib.valid_passcode("１２３４"))
+    check("存档里被手改成数字也认（json 容错）", kidslib.valid_passcode(1234))
+
+    entry = kidslib.PasscodeEntry()
+    entry.push("1")
+    entry.push("2")
+    check("小键盘：按两位记两位", entry.typed == "12" and not entry.full, repr(entry.typed))
+    check("小键盘：非数字直接忽略",
+          entry.push("a") is False and entry.typed == "12")
+    check("小键盘：圆点跟着输入走", entry.dots() == "● ● ○ ○", entry.dots())
+    entry.push("3")
+    check("小键盘：第 4 位才报输满", entry.push("4") is True and entry.full)
+    check("小键盘：满了不再吃多余的键",
+          entry.push("9") is False and entry.typed == "1234")
+    check("小键盘：比对密码", entry.matches("1234") and not entry.matches("0000"))
+    entry.pop()
+    check("小键盘：退格去掉一位", entry.typed == "123")
+
+    overlay = kidslib.KidsOverlay("2468")
+    overlay.setGeometry(0, 0, 640, 480)
+    overlay.show()
+    shot = overlay.grab()
+    check("遮罩能离屏渲染一帧", not shot.isNull(), f"{shot.width()}×{shot.height()}")
+    check("右上角是家长热区",
+          overlay._zone_rect().contains(overlay._zone_rect().center()))
+    check("桌面中间不是热区（点它什么也不会发生）",
+          not overlay._zone_rect().contains(QPoint(80, 400)))
+    fired: list[int] = []
+    overlay.unlocked.connect(lambda: fired.append(1))
+    for digit in "1111":
+        overlay._push(digit)
+    check("错密码不解锁", fired == [])
+    check("错密码会自己清空（不用手动退格）", overlay._entry.typed == "")
+    # 这里必须比**屏幕上那个 QLabel**，不能只比模型：出图脚本就是这么抓到
+    # "敲前三位界面不亮圆点"那个 bug 的（模型对、界面没刷新）。
+    overlay._push("5")
+    check("敲一位，屏幕上的圆点立刻跟一颗",
+          overlay._entry.dots() == "● ○ ○ ○"
+          and overlay._dots is not None and overlay._dots.text() == "● ○ ○ ○",
+          overlay._dots.text() if overlay._dots is not None else "没有圆点控件")
+    overlay._push("5")
+    overlay._push("5")
+    check("敲三位亮三颗",
+          overlay._entry.dots() == "● ● ● ○"
+          and overlay._dots is not None and overlay._dots.text() == "● ● ● ○",
+          overlay._dots.text() if overlay._dots is not None else "没有圆点控件")
+    overlay._clear()
+    check("「清除」把圆点也一起清掉",
+          overlay._entry.typed == ""
+          and overlay._dots is not None and overlay._dots.text() == "○ ○ ○ ○",
+          overlay._dots.text() if overlay._dots is not None else "没有圆点控件")
+    for digit in "2468":
+        overlay._push(digit)
+    check("对密码解锁", fired == [1])
+    overlay.close()
+
+    #: 只实现 KidsMode 真正会调到的那一个方法，免得在测试里造一整只桌宠
+    class _FakePet(QWidget):
+        def __init__(self, cfg: Config):
+            super().__init__()
+            self.cfg = cfg
+            self.calls: list[bool] = []
+
+        def set_topmost(self, on: bool) -> None:
+            self.calls.append(bool(on))
+            self.cfg.topmost = bool(on)     # 和真 PetWindow 的行为保持一致
+
+    kcfg = Config()
+    check("存档里只有一个 kids 字段（绝不存「正在锁定」）",
+          [f.name for f in dc_fields(kcfg) if "kids" in f.name] == ["kids_passcode"],
+          str([f.name for f in dc_fields(kcfg) if "kids" in f.name]))
+    check("默认没有密码、也没记着上次开着（重启即解除）",
+          kcfg.kids_passcode == "")
+    kpet = _FakePet(kcfg)
+    kpet.show()
+    kmode = kidslib.KidsMode(kcfg, kpet)
+    check("没设密码就不许进（否则退不出来）",
+          kmode.enter(False) == "fail" and not kmode.active)
+    kcfg.kids_passcode = "1357"
+    kcfg.topmost = False                    # 用户本来就关着置顶
+    check("安全档进得去", kmode.enter(False) == "safe")
+    check("进去之后 active", kmode.active)
+    check("锁定期间桌宠被强制置顶（否则整屏什么也点不了）",
+          kcfg.topmost is True and kpet.calls == [True], str(kpet.calls))
+    spare = QWidget()
+    spare.show()
+    kmode.adopt(spare)
+    check("新开出来的窗口被抬到遮罩之上",
+          bool(spare.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
+    kmode.leave()
+    check("退出后 active 归零", not kmode.active)
+    check("桌宠置顶还原成用户原来的设置",
+          kcfg.topmost is False and kpet.calls == [True, False], str(kpet.calls))
+    check("临时置顶过的窗口被还回去",
+          not (spare.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
+    try:
+        kmode.leave()
+        kmode.leave()
+        kmode.shutdown()
+        kmode.shutdown()
+        check("重复退出 / 重复收尾都不炸", True)
+    except Exception as exc:                # noqa: BLE001
+        check("重复退出 / 重复收尾都不炸", False, repr(exc))
+    check("收尾之后没有残留的键盘钩子", not kmode.strict)
+    spare.close()
+    kpet.close()
+
+    blocker = KeyBlocker()
+    installed = blocker.install()
+    check("键盘钩子在这台机器上装得上", installed,
+          "装不上时严格档会自动降级成安全档，并且会弹窗说明")
+    if installed:
+        check("装上之后 active 为真", blocker.active)
+        blocker.uninstall()
+        check("卸掉之后 active 为假", not blocker.active)
+    try:
+        blocker.uninstall()
+        check("重复卸钩子不炸", True)
+    except Exception as exc:                # noqa: BLE001
+        check("重复卸钩子不炸", False, repr(exc))
+
+    locked_pet = PetWindow(Config(), bank, GAMES)
+
+    def _menu_titles(menu: QMenu) -> list[str]:
+        # 子菜单那一条 action 的 text() 就是子菜单的标题，不用再问 menu().title()
+        return [act.text() or "" for act in menu.actions()]
+
+    open_titles = _menu_titles(locked_pet._build_menu())
+    locked_pet.kids_locked = True
+    shut_titles = _menu_titles(locked_pet._build_menu())
+    locked_pet.kids_locked = False
+    check("平时菜单里有「幼儿模式」入口",
+          any("幼儿模式" in t for t in open_titles))
+    for gone in ("退出", "藏进托盘", "幼儿模式"):
+        check(f"锁着时菜单里没有「{gone}」（不能自己开门）",
+              any(gone in t for t in open_titles)
+              and not any(gone in t for t in shut_titles))
+    for kept in ("逗它玩", "卡册", "一起玩游戏"):
+        check(f"锁着时菜单里保留「{kept}」", any(kept in t for t in shut_titles))
 
     # ---------------------------------------------------------- 版本号
     section("版本号")

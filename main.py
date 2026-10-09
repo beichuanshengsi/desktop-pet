@@ -15,13 +15,14 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import Qt                                    # noqa: E402
-from PySide6.QtGui import QGuiApplication, QIcon                 # noqa: E402
-from PySide6.QtWidgets import QApplication                      # noqa: E402
+from PySide6.QtCore import Qt, QTimer                          # noqa: E402
+from PySide6.QtGui import QGuiApplication, QIcon                # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox        # noqa: E402
 
 from pet import __version__                                      # noqa: E402
 from pet import backup                                           # noqa: E402
 from pet import icon as iconlib                                 # noqa: E402
+from pet import kids as kidslib                                  # noqa: E402
 from pet import uitheme                                          # noqa: E402
 from pet.assets import AssetBank                                 # noqa: E402
 from pet.config import Config, now_stamp                        # noqa: E402
@@ -119,6 +120,13 @@ class DesktopPetApp:
                             on_quit=self.quit, on_game=self.open_game, games=GAMES)
         self.tray.show()
 
+        # 幼儿模式（见 pet/kids.py）。它只认识 cfg / 桌宠 / 托盘这三样，
+        # 窗口那一侧的接线全在这儿 —— 控制器自己不去管"谁来开游戏"。
+        self.kids = kidslib.KidsMode(self.cfg, self.pet, self.tray)
+        self.pet.request_kids.connect(self.on_kids)
+        self.kids.entered.connect(self._on_kids_entered)
+        self.kids.left.connect(self._on_kids_left)
+
         # 同一时刻只开一个游戏窗口（两个都开着的话，两边计时器都在跑，
         # 而且托盘菜单里没法看出哪个是"当前这个"）
         #
@@ -148,6 +156,10 @@ class DesktopPetApp:
         self.game.setWindowIcon(self.icon)
         self.game.closed.connect(self._on_game_closed)
         self.game.show()
+        # 幼儿模式开着的话，游戏窗口也得抬到遮罩之上 —— 不然它是"开出来了
+        # 但被玻璃压在下面"，用户看到的是"点了没反应"。放在 show() 之后调，
+        # 是因为它内部要用 setWindowFlag 加置顶（那会让窗口隐藏再重新显示）。
+        self.kids.adopt(self.game)
         self.game.raise_()
         self.game.activateWindow()
         self.game.setFocus()
@@ -200,9 +212,52 @@ class DesktopPetApp:
         """
         self.tray.showMessage(title, text, self.icon, 6000)
 
+    # ------------------------------------------------------------ 幼儿模式
+
+    def on_kids(self, command: str) -> None:
+        """右键菜单里「幼儿模式」那几项。命令的含义见 ``PetWindow.request_kids``。
+
+        密码/遮罩/钩子的细节都在 ``pet/kids.py``，这里只做三件窗口管不了的事：
+        **问密码**、**把"严格档其实没生效"说出来**、**同步桌宠的菜单锁定态**。
+        """
+        if command == "passcode":
+            kidslib.ask_new_passcode(self.pet, self.cfg)
+            return
+
+        strict = command == "strict"
+        if not kidslib.ensure_passcode(self.pet, self.cfg):
+            return              # 用户在设密码那一步取消了：那就什么也不做
+
+        got = self.kids.enter(strict)
+        if got == "fail":
+            self.tray.showMessage("幼儿模式没开成",
+                                  "退出密码不是 4 位半角数字，先设一个再开。",
+                                  self.icon, 8000)
+            return
+        if strict and got == "safe":
+            # 钩子没装上（多半被安全软件拦了）。**这件事必须说出来** ——
+            # 不说的后果是用户以为锁死了，其实 Win 键还能按，而他不会去验。
+            # 用 singleShot 推一拍，让遮罩先铺好再弹，看起来更顺。
+            QTimer.singleShot(0, lambda: QMessageBox.warning(
+                self.pet, "严格档没生效",
+                kidslib.mode_note(True, got) + "\n\n"
+                "键盘钩子没装成功，通常是被安全软件拦下了（它和键盘记录器用同一个"
+                "系统接口）。遮罩已经铺好，桌宠照常能玩。"))
+
+    def _on_kids_entered(self, _mode: str) -> None:
+        # 锁着的时候右键菜单必须砍掉「退出」「藏进托盘」和那几个开关，
+        # 否则小朋友右键一下就能自己解开（见 PetWindow._build_menu）
+        self.pet.kids_locked = True
+
+    def _on_kids_left(self) -> None:
+        self.pet.kids_locked = False
+
     # ------------------------------------------------------------ 退出
 
     def quit(self) -> None:
+        # 钩子是**系统级**的：程序退了它还挂着，Win 键会莫名其妙失效，
+        # 而用户完全联想不到是桌宠。所以这里必须先卸干净。
+        self.kids.shutdown()
         self.cfg.save()
         self.tray.hide()
         self.pet.close()

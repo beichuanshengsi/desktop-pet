@@ -118,6 +118,16 @@ class PetWindow(QWidget):
     #: 但应该知道一声**的事上。出口在 ``main.py``（托盘气泡）。
     #: 为什么不直接弹窗：桌宠的硬约束是绝不打断用户，见模块开头。
     notify = Signal(str, str)
+    #: 幼儿模式的相关请求。参数是一个命令，由 ``main.py`` 去执行：
+    #:
+    #: * ``"safe"``      —— 开启安全档（只锁鼠标）
+    #: * ``"strict"``    —— 开启严格档（遮罩 + 低级键盘钩子）
+    #: * ``"passcode"``  —— 换一个退出密码
+    #:
+    #: 和 ``request_game`` 一个套路：窗口只管把意图发出去，**窗口自己不开遮罩、
+    #: 不装钩子**。遮罩要盖住所有显示器、还要把游戏/卡册抬到它上面，那些事
+    #: 窗口这一层根本看不见（它连自己之外有哪几个窗口都不知道）。
+    request_kids = Signal(str)
 
     def __init__(self, cfg: Config, bank: AssetBank, games=(), parent=None):
         super().__init__(parent)
@@ -126,6 +136,14 @@ class PetWindow(QWidget):
         # 游戏清单由 main.py 传进来。pet 这一层不认识 game 包，
         # 菜单只管把标识发出去，谁来开窗口是主程序的事。
         self._games = tuple(games)
+        #: 幼儿模式是否正开着。由 ``main.py`` 在进出时设置。
+        #:
+        #: 它只影响**右键菜单里出现什么**：锁着的时候菜单必须砍掉「退出」
+        #: 「藏进托盘」和那几个开关 —— 否则小朋友右键一下就能把模式关掉，
+        #: 或者把桌宠藏进托盘让自己没得玩（看着就像坏了）。
+        #: 注意这是**白名单式**的（锁着时只加"玩桌宠"那几块），不是黑名单：
+        #: 以后新加一个菜单项，默认不会漏进幼儿模式里。
+        self.kids_locked = False
 
         self.setWindowTitle("桌宠")
         self._apply_window_flags()
@@ -946,6 +964,10 @@ class PetWindow(QWidget):
         三个开关）都走 ``pet/menu.py``，**不在这里重写一遍** —— 加一样商品
         只改那份登记表。这里只放"只有右键菜单才有"的条目。
 
+        **幼儿模式开着时（``self.kids_locked``）只搭"玩桌宠"那几块**，
+        然后提前 return —— 见下面那段注释。理由不是"小朋友不该看到设置"，
+        而是这里面有能一键解开锁的条目。
+
         第一行是状态行而且不可点：菜单一拉出来就先看见"它饿没饿、手上有多少钱"，
         不用再点进二级菜单。
         """
@@ -961,7 +983,20 @@ class PetWindow(QWidget):
         menulib.add_bag(menu, self, self.cfg)
         menulib.add_pomodoro(menu, self)
         menulib.add_game_menu(menu, self._games, self.request_game.emit)
+
+        if self.kids_locked:
+            # 幼儿模式开着。上面那几块全是"玩桌宠"，留着；下面那些一律不给 ——
+            # 特别是「退出」和「藏进托盘」：小朋友右键一下就能自己解开锁，
+            # 或者把桌宠藏起来让自己没得玩（看着就像坏了）。
+            #
+            # 这一段是**白名单**（锁着时只补一条无害的），不是黑名单：
+            # 以后新加菜单项，默认不会漏进幼儿模式。
+            menu.addSeparator()
+            menu.addAction("回到默认位置", self.reset_position)
+            return menu
+
         menu.addSeparator()
+        menulib.add_kids(menu, self, self.cfg)
         menulib.add_toggles(menu, self.cfg, self)
 
         menu.addSeparator()
