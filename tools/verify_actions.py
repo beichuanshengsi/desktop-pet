@@ -13,9 +13,18 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+for _p in (str(ROOT), str(HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from _isolate import assert_isolated, isolate_storage            # noqa: E402
+
+#: 存档隔离 —— **必须排在造 PetWindow 之前**。这个脚本会 show() 真窗口并连拍，
+#: 窗口的自动落盘会把一份临时 cfg 写进存档，把玩家的位置/投喂次数盖成默认值。
+STORAGE = isolate_storage("actions")
+assert_isolated()
 
 from PySide6.QtCore import QTimer, Qt                            # noqa: E402
 from PySide6.QtGui import QGuiApplication                        # noqa: E402
@@ -81,10 +90,8 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
-    # 存档守卫：PetWindow.close() 会触发 closeEvent 写存档，
-    # 那会把用户的位置/投喂次数/最高分盖成默认值。跑完对一遍，变了就还原。
-    cfg_file = ROOT / "config.json"
-    backup = cfg_file.read_bytes() if cfg_file.exists() else None
+    # 存档已经换到临时目录了（见文件开头的 isolate_storage），下面造的 cfg
+    # 是临时对象，窗口把它存盘也落不到玩家的 config.json 上。
 
     cfg = Config()
     cfg.pos_x, cfg.pos_y = 120, 620      # 固定落点：避开用户自己那只宠物常待的位置
@@ -126,10 +133,7 @@ def main() -> int:
         out = assemble(results)
         print(f"[verify] 结果图 -> {out.relative_to(ROOT)}"
               f"  （戳 {len(results['poke'])} 张 / 喂 {len(results['feed'])} 张）")
-        if backup is not None and cfg_file.read_bytes() != backup:
-            cfg_file.write_bytes(backup)
-            print("[verify] 注意：config.json 被改动过，已还原为运行前的版本")
-        pet.hide()                        # 不要 close()，closeEvent 会写存档
+        pet.hide()                        # 片子拍完了，藏起来收工
         app.quit()
 
     QTimer.singleShot(1500, lambda: start("poke"))     # 先等它落到地面

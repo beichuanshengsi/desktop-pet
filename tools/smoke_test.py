@@ -161,6 +161,46 @@ def main() -> int:
     tmp.write_text("{ 这不是合法 JSON", encoding="utf-8")
     check("坏存档不崩溃", isinstance(Config.load(), Config))
 
+    # ------------------------------------------------- 存档隔离开关与每日快照
+    # 这两条是 v2.3.1 补的：v2.3.0 有个验证脚本忘了隔离存档，跑一次就往玩家的
+    # config.json 里塞了 40 张卡。根因是"开发态的数据目录就是项目根"，所以
+    # ① 得有个从根上换掉数据目录的开关，② 得留每日快照兜底。
+    section("存档隔离与每日快照")
+    from pet import backup as backuplib
+    from pet import paths as pathslib
+    from pet.paths import DESKTOP_PET_DATA_DIR_ENV
+
+    home = Path(tempfile.mkdtemp())              # 假装这里才是"数据目录"
+    keep_env = os.environ.get(DESKTOP_PET_DATA_DIR_ENV)
+    os.environ[DESKTOP_PET_DATA_DIR_ENV] = str(home)
+    try:
+        check("环境变量能把数据目录整个换掉", pathslib.data_dir() == home,
+              str(pathslib.data_dir()))
+        real_path = pathslib.config_path()
+        check("存档路径跟着数据目录走", real_path == home / "config.json", str(real_path))
+
+        # 造一份"玩家的存档"，**按真实路径写**（不走上面 patch 过的那个入口），
+        # 否则测的是补丁、不是快照本身。
+        real_path.write_text('{"coins": 7}', encoding="utf-8")
+        snap = backuplib.snapshot_daily()
+        check("首次启动留下当天快照", snap is not None and snap.exists(),
+              snap.name if snap else "None")
+        check("快照内容与存档一致",
+              snap is not None
+              and snap.read_text(encoding="utf-8") == real_path.read_text(encoding="utf-8"))
+        check("同一天不会重复快照", backuplib.snapshot_daily() is None)
+
+        stale = home / "backups" / "config-2020-01-01.json"
+        stale.write_text("{}", encoding="utf-8")
+        backuplib._prune()
+        check("太旧的快照会被清掉", not stale.exists())
+        check("当天的快照留着", snap is not None and snap.exists())
+    finally:
+        if keep_env is None:
+            os.environ.pop(DESKTOP_PET_DATA_DIR_ENV, None)
+        else:
+            os.environ[DESKTOP_PET_DATA_DIR_ENV] = keep_env
+
     # ---------------------------------------------------------- 状态机
     section("行为状态机")
     # speed=1.0，让 IDLE 时长维持在 2.2~6.5 秒，断言才不会被随机漫步打乱

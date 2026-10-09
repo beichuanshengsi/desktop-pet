@@ -8,6 +8,11 @@
 （Qt 会给它正常渲染，但不映射到屏幕）。这一点很关键 —— 用
 ``QT_QPA_PLATFORM=offscreen`` 也能跑，但那个平台**看不到任何系统字体**
 （实测 0 个 family），截出来满屏方块字，没法拿来判断排版对不对。
+
+**也不会碰玩家的存档**：本脚本会造真的 ``PetWindow``（它每 3 秒自动落盘），
+所以开头先把可写数据目录整个换到临时目录（见 ``tools/_isolate.py``）。
+v2.3.0 刚发布时这里漏了这一步，跑一次验证就往玩家卡册里塞了 40 张卡、
+把装备栏填满、还把金币和首跑时间改成了测试数值 —— 别再犯。
 """
 
 from __future__ import annotations
@@ -17,8 +22,17 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+for _p in (str(ROOT), str(HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from _isolate import assert_isolated, isolate_storage               # noqa: E402
+
+#: 存档隔离 —— **必须排在所有 pet.* 导入和一切 Config()/PetWindow() 之前**。
+STORAGE = isolate_storage("album_ui")
+assert_isolated()
 
 from PySide6.QtCore import Qt                               # noqa: E402
 from PySide6.QtGui import QPixmap                           # noqa: E402

@@ -11,6 +11,12 @@ config.json
 config.json.tmp
 *.log
 
+# 存档的每日快照（pet/backup.py 生成）与修档时的备份（tools/repair_save.py 生成）。
+#   config.json 本身就不入库，它的快照/备份更没有理由入。
+backups/
+config.json.before-repair-*.bak
+config.*.json.bak
+
 # 预览/验证产物（随时可重新生成，不必入库）
 #   2026-09-21 起这些图从项目根目录改到了 reports/，规则跟着改。
 reports/preview_sheet.png

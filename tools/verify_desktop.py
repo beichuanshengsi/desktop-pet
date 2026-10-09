@@ -16,9 +16,19 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+for _p in (str(ROOT), str(HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from _isolate import assert_isolated, isolate_storage            # noqa: E402
+
+#: 存档隔离 —— **必须排在造 PetWindow 之前**。这个脚本会 show() 真窗口、还会
+#: close()，两条路都会写 config.json；不隔离的话玩家的位置/投喂次数/最高分
+#: 就被一份临时 cfg 的默认值盖掉了。
+STORAGE = isolate_storage("desktop")
+assert_isolated()
 
 from PySide6.QtCore import QTimer, Qt                            # noqa: E402
 from PySide6.QtGui import QGuiApplication                        # noqa: E402
@@ -39,10 +49,8 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
-    # 存档守卫：下面用的 cfg 是临时对象，close() 会触发 closeEvent 把它存盘，
-    # 于是用户的位置、投喂次数、最高分全被默认值盖掉。跑完对一遍，变了就还原。
-    cfg_file = ROOT / "config.json"
-    backup = cfg_file.read_bytes() if cfg_file.exists() else None
+    # 存档已经换到临时目录了（见文件开头的 isolate_storage），下面造的 cfg
+    # 是临时对象，close() 把它存盘也落不到玩家的 config.json 上。
 
     # 贴图现在只来自素材目录，不再有"代码画的兜底风格"生成这一步。
     # 目录空着就直说，别让人对着一张透明截图排查。
@@ -79,10 +87,7 @@ def main() -> int:
         print(f"[verify] 透明属性 WA_TranslucentBackground = "
               f"{pet.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)}")
         print(f"[verify] 结果：{'通过' if result['shot'] else '未取到截图'}")
-        if backup is not None and cfg_file.read_bytes() != backup:
-            cfg_file.write_bytes(backup)
-            print("[verify] 注意：config.json 被改动过，已还原为运行前的版本")
-        pet.hide()                  # 不要 close()，closeEvent 会写存档
+        pet.hide()                  # 留窗口.show() 只是为截这一张，收工藏起来
         app.quit()
 
     QTimer.singleShot(1200, capture)

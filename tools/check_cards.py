@@ -16,12 +16,23 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+for _p in (str(ROOT), str(HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-from pet.cards import (COIN_PER_PULL, COST, DISSOLVE, EQUIP_BONUS, EQUIP_CAP,
+from _isolate import assert_isolated, isolate_storage               # noqa: E402
+
+#: 存档隔离 —— **必须最先做**。下面会造一堆假玩家（新档 / 老档 / 满图鉴），
+#: 而开发态的 ``Config()`` 读的正是项目根里玩家那份真存档。
+STORAGE = isolate_storage("check_cards")
+assert_isolated()
+
+from pet.cards import (COIN_PER_PULL, COST, DISSOLVE, EQUIP_BONUS, EQUIP_CAP,  # noqa: E402
                        GUARD, LOW_TO_HIGH_CAP, LOW_TO_HIGH_RATE, RATE, WEEKLY_QUOTA,
                        Album, coin_bonus, coins_with_bonus, load_pool, week_stamp)
-from pet.config import STAMP_FMT, Config
+from pet.config import STAMP_FMT, Config                            # noqa: E402
 
 FAILS: list[str] = []
 PASSES = 0

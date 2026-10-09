@@ -21,9 +21,18 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+for _p in (str(ROOT), str(HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from _isolate import assert_isolated, isolate_storage            # noqa: E402
+
+#: 存档隔离 —— **必须排在造 PetWindow 之前**。这个脚本会 new 真窗口来渲染
+#: "向左走/向右走"，窗口的自动落盘会把一份临时 cfg 写进玩家的存档。
+STORAGE = isolate_storage("facing")
+assert_isolated()
 
 from PIL import Image, ImageDraw, ImageFont                       # noqa: E402
 from PySide6.QtCore import Qt                                     # noqa: E402
@@ -133,10 +142,8 @@ def cell(img: Image.Image, label: str, note: str = "", note_color=OK):
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
 
-    # 存档守卫：这个脚本会 new 真窗口，万一哪条路径把 cfg 存了盘，
-    # 用户的位置/分数就被默认值盖掉了。跑完对一遍，变了就还原回去。
-    cfg_file = ROOT / "config.json"
-    backup = cfg_file.read_bytes() if cfg_file.exists() else None
+    # 存档已经换到临时目录了（见文件开头的 isolate_storage），这个脚本 new
+    # 出来的真窗口怎么存盘都落不到玩家的 config.json 上。
 
     pet_dir = pet_asset_dir()
     base = facinglib.current()
@@ -242,9 +249,6 @@ def main() -> int:
     print(f"[验收] 结果图 : {OUT.relative_to(ROOT)}  {len(blocks)} 套")
     print(f"[验收] 结论   : {verdict}")
 
-    if backup is not None and cfg_file.read_bytes() != backup:
-        cfg_file.write_bytes(backup)
-        print("[验收] 注意：config.json 被改动过，已还原为运行前的版本")
     shutil.rmtree(TMP, ignore_errors=True)          # 中间产物，图已经拼好了
     return 0 if pass_ok else 1
 

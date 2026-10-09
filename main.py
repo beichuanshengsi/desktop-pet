@@ -20,6 +20,7 @@ from PySide6.QtGui import QGuiApplication, QIcon                 # noqa: E402
 from PySide6.QtWidgets import QApplication                      # noqa: E402
 
 from pet import __version__                                      # noqa: E402
+from pet import backup                                           # noqa: E402
 from pet import icon as iconlib                                 # noqa: E402
 from pet import uitheme                                          # noqa: E402
 from pet.assets import AssetBank                                 # noqa: E402
@@ -88,6 +89,10 @@ class DesktopPetApp:
 
     def __init__(self, qapp: QApplication, cfg: Config | None = None):
         self.qapp = qapp
+        # 先留一份今天的快照再动任何东西 —— 存档只有一份，出事时那份旧的就是
+        # 全部线索（见 pet/backup.py）。失败也只是少一份快照，不影响启动。
+        backup.snapshot_daily()
+
         self.cfg = cfg if cfg is not None else Config.load()
         if not self.cfg.launched_at:
             self.cfg.launched_at = now_stamp()

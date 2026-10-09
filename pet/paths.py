@@ -39,6 +39,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+#: 把可写数据目录（存档、用户自定义素材）临时改到别处的环境变量。
+#:
+#: **测试脚本必须用它**。开发态的数据目录就是项目根，而 ``PetWindow`` 每 3 秒
+#: 自动落盘一次 —— 验证脚本只要造一个真窗口、跑上几秒，就会把玩家的真存档整份
+#: 覆盖掉。v2.3.0 的 ``verify_album_ui`` 就是这么干的：40 次抽卡 + 5 张装备 +
+#: 被改成"120 天前"的首次运行时间，全写进了玩家存档。
+#:
+#: 为什么用环境变量而不是像老脚本那样改 ``pet.config.config_path``：
+#: 那个函数是**导入时按名字绑进** ``pet/config.py`` 的，谁再 ``from .paths import
+#: config_path`` 一次就绕过了补丁。改这里则是从根上换掉整个数据目录，
+#: ``config_path`` / ``user_asset_dir`` 全都跟着走，漏不掉。
+DESKTOP_PET_DATA_DIR_ENV = "DESKTOP_PET_DATA_DIR"
+
+
 # ---------------------------------------------------------------- 两个根
 
 def app_root() -> Path:
@@ -49,7 +63,19 @@ def app_root() -> Path:
 
 
 def data_dir() -> Path:
-    """可写数据根目录（存档、用户自定义素材）。"""
+    """可写数据根目录（存档、用户自定义素材）。
+
+    优先级：``DESKTOP_PET_DATA_DIR`` 环境变量 > 冻结态 ``%APPDATA%`` > 项目根。
+    """
+    override = os.environ.get(DESKTOP_PET_DATA_DIR_ENV)
+    if override:
+        base = Path(override)
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        return base
+
     if getattr(sys, "frozen", False):
         base = Path(os.environ.get("APPDATA") or Path.home()) / "DesktopPet"
     else:
