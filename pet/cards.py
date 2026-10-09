@@ -263,6 +263,22 @@ class Album:
     def all_cards(self) -> tuple[Card, ...]:
         return self.pool.all()
 
+    def shelf(self, owned_only: bool = False) -> tuple[Card, ...]:
+        """卡册当前要摆出来的卡。
+
+        ``owned_only=False``（默认）是**整本图鉴**：没抽到的也留一张剪影占位，
+        因为"还有 102 张可以收集"这件事必须让人一眼看见（见 ``album_panel``
+        开头的第 3 条规矩）。``owned_only=True`` 只留已拥有的 —— 收集得差不多
+        之后，翻九页找自己那几十张确实烦。
+
+        放在这里而不是卡册界面里：**"哪些卡、按什么顺序"是卡册的数据，
+        不是排版**。摆到界面里之后，任何想验它的脚本都得先造一个窗口。
+        """
+        cards = self.pool.all()
+        if not owned_only:
+            return cards
+        return tuple(c for c in cards if self.is_owned(c.id))
+
     def duplicates(self) -> int:
         """一共有多少张"多余的"（可以分解的）。"""
         return sum(max(0, n - 1) for n in self.cfg.cards.values())

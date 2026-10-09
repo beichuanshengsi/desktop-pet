@@ -122,6 +122,10 @@ class Config:
     low_convert_used: int = 0
     #: 兑换保底计数：档位 -> 连续撞重复了几次，见 ``cards.GUARD``。
     dup_streak: dict[str, int] = field(default_factory=dict)
+    #: 卡册是否只显示已拥有的卡（见 ``cards.Album.shelf``）。
+    #: 默认关：新玩家先要看见"还有一百多张可收集"，一上来只显示空册会
+    #: 让人以为这系统是坏的。这是个纯显示偏好，记着只是为了不用每次重设。
+    album_owned_only: bool = False
 
     # ---------------- 幼儿模式（见 pet/kids.py）
     #

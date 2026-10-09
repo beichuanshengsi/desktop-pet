@@ -213,6 +213,33 @@ def main() -> int:
           pull is not None and not pull.is_new and album.owned_kinds() == len(pool))
     check("重复张会计数", album.duplicates() == 1, f"{album.duplicates()}")
 
+    print("\n[12] 卡册摆哪几张（shelf，v2.6.0 的「仅看已有」）")
+    # 用一个只有一半收集进度的新档：这样"整本"和"仅已有"的差才有意义。
+    cfg = fresh_cfg(coins=10 ** 6)
+    album = Album(cfg, rng=random.Random(7), cards=pool)
+    all_cards = pool.all()
+    for card in all_cards[:len(all_cards) // 2]:
+        album._grant(card.id)
+    check("整本 = 卡池原序（没抽到的也是剪影占位，不能凭空消失）",
+          album.shelf(False) == all_cards,
+          f"{len(album.shelf(False))} 张")
+    check("仅已有 = 只留抽到的",
+          len(album.shelf(True)) == album.owned_kinds(),
+          f"{len(album.shelf(True))} / {album.owned_kinds()}")
+    check("仅已有的每一张都真的拥有",
+          all(album.is_owned(c.id) for c in album.shelf(True)))
+    check("顺序不变（只是滤掉，不重排 —— 图鉴的页码才有意义）",
+          [c.id for c in album.shelf(True)]
+          == [c.id for c in all_cards if album.is_owned(c.id)])
+    # 配置项的落盘往返：卡册切换"仅看已有"要记住，靠的就是它
+    cfg.album_owned_only = True
+    cfg.save()
+    again = Config.load()
+    check("「仅看已有」写进存档、读得回来", again.album_owned_only is True)
+    again.album_owned_only = False
+    check("默认是整本图鉴（新玩家得先看见还有多少没收集）",
+          Config().album_owned_only is False)
+
     print("\n" + "=" * 62)
     if FAILS:
         print(f"失败 {len(FAILS)} 项 / 通过 {PASSES} 项：")

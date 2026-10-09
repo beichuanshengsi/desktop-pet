@@ -151,6 +151,27 @@ def main() -> int:
         check("选中一张已拥有的卡", panel._selected == card.id)
         panel.grab().save(str(out_dir / "卡册_选中态.png"))
 
+    print("\n[4b] 「仅看已有」开关（v2.6.0）")
+    panel.cfg.album_owned_only = False
+    panel._page = 0
+    panel.refresh()
+    all_total = len(panel._cards)
+    panel._toggle_mode()
+    check("切到「仅看已有」", panel.cfg.album_owned_only is True)
+    check("列表只剩已拥有的", len(panel._cards) == pet.album.owned_kinds(),
+          f"{all_total} → {len(panel._cards)}")
+    check("切换后页号归零（两个模式列表长度不同，保留页号会指到别的卡）",
+          panel._page == 0)
+    check("按钮写的是「看全部」（写的是点下去会变成什么，不是当前状态）",
+          panel.mode.text() == "看全部", panel.mode.text())
+    want_owned_pages = -(-len(panel._cards) // page)
+    check("页数公式照旧", panel._page_count() == want_owned_pages,
+          f"{panel._page_count()} 页")
+    panel.grab().save(str(out_dir / "卡册_仅看已有.png"))
+    panel._toggle_mode()
+    check("切回整本图鉴", len(panel._cards) == all_total
+          and not panel.cfg.album_owned_only)
+
     print("\n[5] 装备后的徽章栏")
     legendary = pet.album.cards_of("传说")
     for card in legendary[:3]:

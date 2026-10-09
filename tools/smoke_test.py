@@ -884,6 +884,89 @@ def main() -> int:
     check("声明为右对齐的段都在 HUD 表里",
           set(HUD_ALIGN_RIGHT) <= set(HUD_ZONES), "/".join(HUD_ALIGN_RIGHT))
 
+    # ------------------------------------------- 弹跳得分 · 侧撞判定（v2.6.0）
+    section("弹跳得分 · 侧撞判定")
+
+    # 当年的 bug：从侧面撞上去时判定走的是"球心在方块上方还是下方"的分支，
+    # 而且球的位置**从来没被推出方块** —— 于是贴着侧面的每一帧都算一次命中，
+    # 实测 6 帧扣 6 点血；1 点耐久的方块当场消失、球直接横穿过去，
+    # 看着像"从旁边一碰就把砖块点碎了"。修复 = 按最小穿透轴分出侧面 +
+    # 先推出去再弹开（一次接触只算一下）。
+
+    def side_ball(mg_, blk_, push: float = 6.0) -> None:
+        """把球贴到方块的左侧面、往里压 ``push`` 像素，垂直方向居中。"""
+        mg_.ball.teleport(blk_.body.x - MG_PLAYER + push,
+                          blk_.body.y + MG_BLOCK_H / 2 - MG_PLAYER / 2)
+        mg_.ball.vx = 400.0
+        mg_.ball.vy = 0.0
+        mg_.ball.on_ground = False
+
+    side_blk = Block(300.0, 300.0, 1, 9)
+    mg.blocks = [side_blk]
+    mg.score = 0
+    mg.combo = 0
+    mg.power_left = mg.double_left = 0.0
+    mg.keys.clear()
+    side_ball(mg, side_blk)
+    check("球贴着侧面、确实压进去了", mg.ball.overlaps(side_blk.body))
+
+    hp0 = side_blk.hp
+    for _ in range(6):
+        mg._step(1 / 60)                     # 真循环：修复前这里 6 帧扣 6 点
+    check("贴着侧面 6 帧只算 1 次命中（一次接触只算一下）",
+          side_blk.hp == hp0 - 1, f"{hp0} -> {side_blk.hp}")
+    check("侧面也算命中：扣 1 点耐久、方块还活着",
+          side_blk.alive and side_blk.hp == 8, f"hp={side_blk.hp}")
+
+    side_ball(mg, side_blk)
+    mg._hit_block(side_blk, power=False)
+    check("侧面撞的是墙：水平方向被弹回去", mg.ball.vx < 0, f"vx={mg.ball.vx:.0f}")
+    check("球被推出去、正好贴住方块表面（贴住不算重叠，所以不会连击）",
+          not mg.ball.overlaps(side_blk.body)
+          and abs(mg.ball.x + MG_PLAYER - side_blk.body.x) < 0.01,
+          f"球右沿 {mg.ball.x + MG_PLAYER:.1f} vs 方块左沿 {side_blk.body.x:.1f}")
+
+    # 右侧对称
+    mg.ball.teleport(side_blk.body.x + MG_BLOCK_W - 6.0,
+                     side_blk.body.y + MG_BLOCK_H / 2 - MG_PLAYER / 2)
+    mg.ball.vx = -400.0
+    mg._hit_block(side_blk, power=False)
+    check("从右边撞也一样：弹回去的方向跟着变", mg.ball.vx > 0,
+          f"vx={mg.ball.vx:.0f}")
+
+    # 陷得很深（一帧飞进去大半个身子）也推得出去
+    mg.ball.teleport(side_blk.body.x + 40.0,
+                     side_blk.body.y + MG_BLOCK_H / 2 - MG_PLAYER / 2)
+    mg._hit_block(side_blk, power=False)
+    check("陷得很深也推得出去（不会卡在方块里连扣）",
+          not mg.ball.overlaps(side_blk.body))
+
+    # 一帧只判一块：卡在两块交界处不该白刷两下
+    left = Block(300.0, 300.0, 1, 9)
+    right = Block(left.body.x + MG_BLOCK_W + 14, 300.0, 1, 9)
+    mg.blocks = [left, right]
+    mg.ball.teleport(371.0, 300.0 + MG_BLOCK_H / 2 - MG_PLAYER / 2)
+    mg.ball.vx = 0.0
+    check("球同时压住相邻两块",
+          mg.ball.overlaps(left.body) and mg.ball.overlaps(right.body))
+    before = left.hp + right.hp
+    mg._step(1 / 60)
+    check("一帧只判一块（交界处不是白刷两下）",
+          left.hp + right.hp == before - 1,
+          f"共扣 {before - (left.hp + right.hp)} 点")
+
+    # 顶/底面的老规则没有被这次改动改坏（直接调 _hit_block，看它弹哪个方向）
+    lid = fresh_block(hp=3)
+    ram_ball(mg, -MG_PLAYER + 6, 700.0)          # 球在方块上面，正在下落
+    mg._hit_block(lid, power=False)
+    check("顶面：照旧借力弹起（vy 朝上）", mg.ball.vy < 0, f"vy={mg.ball.vy:.0f}")
+    check("顶面：球也被推出来了（以前会一直陷在里面连扣）",
+          not mg.ball.overlaps(lid.body))
+    floor_blk = fresh_block(hp=3)
+    ram_ball(mg, MG_BLOCK_H - 6, -900.0)         # 球顶在方块底面
+    mg._hit_block(floor_blk, power=False)
+    check("底面：照旧被挡回来（vy 朝下）", mg.ball.vy > 0, f"vy={mg.ball.vy:.0f}")
+
     mg.close()
 
     # ---------------------------------------------------------- 接狗狗

@@ -36,6 +36,16 @@ v2.1.0：为什么"太无聊"以及怎么改的
 因为现在一块最多要敲 6 下。不这么改的话，同一局能拿到的分数会翻好几倍，
 小卖部的金币直接通胀 —— 汇率（``game/common.py`` 的 ``COIN_PER_SCORE``）
 是按"认真打一局够买一两样东西"定的，这里必须跟着它走。
+
+v2.6.0：补上侧面
+----------------
+上面那套"墙"的规则原来只认顶面与底面 —— 球从**侧面**撞上来时走的是
+"球心在方块上方还是下方"的分支，而且球的位置从来没被推出方块。后果是
+贴着侧面时**每一帧都算一次命中**：一块 3 点耐久的两下就没了，1 点耐久的
+当场消失、球直接横穿过去，看着像"从旁边一碰就把砖块点碎了"。
+
+现在按**最小穿透轴**分出撞的是哪个面（见 ``_bounce_off``）：侧面一样扣
+1 点耐久（侧面也算命中），但要把球推出去再水平弹回，**一次接触只算一下**。
 """
 
 from __future__ import annotations
@@ -101,6 +111,12 @@ BLOCK_KNOCKBACK_MIN = 260.0
 #: 从上面踩到没碎的方块 → 借力弹起。这是"踩方块顶"的手感来源。
 BLOCK_BOUNCE_UP = 0.60
 BLOCK_BOUNCE_UP_MIN = 340.0
+#: 从**侧面**撞到没碎的方块 → 水平挡回来。侧面也算命中（扣 1 点耐久），
+#: 但反弹要单独一套数：底面弹回是"往上顶被压回来"，侧面是"横向被挡住"，
+#: 用的力道不一样。最低弹回速度比底面那个小，因为横向是玩家自己按着键
+#: 在推，给太大反而像被弹飞。
+BLOCK_SIDE_BOUNCE = 0.75
+BLOCK_SIDE_BOUNCE_MIN = 240.0
 
 # ---------------------------------------------------------------- 掉落道具
 
@@ -431,16 +447,11 @@ class MiniGame(GameWindow):
             # 而不是由"你落地后站了多久"决定。
             self.combo = 0
 
-        # ---- 撞方块
-        hit = False
+        # ---- 撞方块（一帧只判一块，理由见 _touched_block）
         power = self.power_left > 0.0
-        for blk in self.blocks:
-            if not blk.alive:
-                continue
-            if self.ball.overlaps(blk.body):
-                self._hit_block(blk, power=power)
-                hit = True
-        if hit:
+        touched = self._touched_block()
+        if touched is not None:
+            self._hit_block(touched, power=power)
             self.squash = 1.0
             self._flash = 1.0
         self.blocks = [b for b in self.blocks if b.alive]
@@ -456,12 +467,73 @@ class MiniGame(GameWindow):
 
     # ------------------------------------------------------------ 敲方块
 
+    def _penetration(self, blk: Block) -> tuple[float, float]:
+        """球压进方块多深：``(水平, 垂直)``，两个都为正是真的重叠了。"""
+        ax0, ay0, ax1, ay1 = self.ball.rect()
+        bx0, by0, bx1, by1 = blk.body.rect()
+        return (min(ax1, bx1) - max(ax0, bx0),
+                min(ay1, by1) - max(ay0, by0))
+
+    def _touched_block(self) -> Block | None:
+        """这一帧球真正压进去的那一块；多块同时压住时取压得最深的那块。
+
+        **一帧只判定一块**：球一次只可能真正撞上一个面，同帧把相邻两块一起
+        扣血既说不通，也会让"卡在两块交界处"变成白刷分。同时这也顺手堵掉了
+        侧撞 bug 的另一半 —— 原先"遍历所有重叠方块"的写法在球贴着侧面时
+        每一帧都算命中（实测贴着侧面 6 帧扣 6 点血）。
+        """
+        best: Block | None = None
+        deepest = 0.0
+        for blk in self.blocks:
+            if not blk.alive or not self.ball.overlaps(blk.body):
+                continue
+            ox, oy = self._penetration(blk)
+            depth = min(ox, oy)
+            if depth > deepest:
+                best, deepest = blk, depth
+        return best
+
+    def _bounce_off(self, blk: Block) -> None:
+        """把球从方块里**推出去**，再按撞到的那个面弹开。
+
+        顺序是这里最关键的地方：**先推出去，再给速度**。只改速度、不挪位置的话，
+        下一帧球还陷在方块里，于是又被判一次命中 —— 贴着侧面一帧一次，
+        1 点耐久的方块当场凭空消失（v2.6.0 之前就是这样）。
+        推出去之后球正好贴着方块表面，而 ``overlaps`` 用的是 ``<=``（贴住不算
+        重叠），所以下一次命中必须等球自己再撞上来，**一次接触只算一下**。
+
+        撞的是哪个面用**最小穿透轴**判：水平和垂直哪个方向陷得浅，就是从哪个
+        面进去的。两个一样深（正好卡在角上）算顶/底面 —— 这一款的主角是
+        "从下面顶"，角落争议判给垂直方向更符合直觉。
+        """
+        ball, body = self.ball, blk.body
+        ox, oy = self._penetration(blk)
+
+        if ox < oy:                                   # 侧面：水平挡回去
+            if ball.center[0] < body.x + body.w / 2:
+                ball.x = body.x - ball.w
+                ball.vx = -max(BLOCK_SIDE_BOUNCE_MIN,
+                               abs(ball.vx) * BLOCK_SIDE_BOUNCE)
+            else:
+                ball.x = body.x + body.w
+                ball.vx = max(BLOCK_SIDE_BOUNCE_MIN,
+                              abs(ball.vx) * BLOCK_SIDE_BOUNCE)
+            return
+
+        if ball.center[1] >= body.y + body.h / 2:     # 球心更靠下 → 顶到的是底面
+            ball.y = body.y + body.h
+            ball.vy = max(BLOCK_KNOCKBACK_MIN, abs(ball.vy) * BLOCK_KNOCKBACK)
+        else:                                         # 球心更靠上 → 踩到顶面，借力弹起
+            ball.y = body.y - ball.h
+            ball.vy = -max(BLOCK_BOUNCE_UP_MIN, abs(ball.vy) * BLOCK_BOUNCE_UP)
+        ball.on_ground = False
+
     def _hit_block(self, blk: Block, *, power: bool) -> None:
         """处理一次"球撞上方块"：扣耐久、计分、把球弹开。
 
         **弹开规则是本轮改动的核心**，也是它和普通打砖块最大的不同：
 
-        球从下面顶到一块**没敲碎**的方块 → 被挡回去。那一刻它就是一堵墙。
+        球顶到一块**没敲碎**的方块 → 被挡回去。那一刻它就是一堵墙。
         球敲碎了那块 → 方块没了，球原样继续往上 → 于是能连穿上面几排。
 
         旧版永远是后一种情况（一碰就碎），所以永远"穿过去"，
@@ -469,6 +541,11 @@ class MiniGame(GameWindow):
 
         从**上面**踩到没碎的方块则是借力弹起（`BLOCK_BOUNCE_UP`），
         让"落点踩在方块顶上"也有用，而不是只能从下面顶。
+
+        v2.6.0 补上**侧面**：以前只按"球心在方块上方还是下方"分成两种，侧面
+        撞上去也走这两条分支，而且球的位置从来没被推出方块 —— 于是无论从哪个
+        方向贴上去，都是每帧扣一点耐久。现在按撞到的那个面分开处理
+        （见 ``_bounce_off``），侧面一样扣 1 点耐久，但只算**一次**。
         """
         blk.hp -= 99 if power else 1
         blk.flash = 1.0
@@ -483,16 +560,7 @@ class MiniGame(GameWindow):
                              text=f"+{gained}", color=blk.color.darker(115)))
 
         if blk.hp > 0:
-            # 没敲碎：把球挡回去
-            cx, cy = self.ball.center
-            bx, by = blk.body.center
-            if cy >= by:                       # 球在方块下方 → 顶到的是底面
-                self.ball.vy = max(BLOCK_KNOCKBACK_MIN,
-                                   abs(self.ball.vy) * BLOCK_KNOCKBACK)
-            else:                              # 球在方块上方 → 踩到顶面，借力弹起
-                self.ball.vy = -max(BLOCK_BOUNCE_UP_MIN,
-                                    abs(self.ball.vy) * BLOCK_BOUNCE_UP)
-            self.ball.on_ground = False
+            self._bounce_off(blk)          # 没敲碎：那它就是墙
             return
 
         blk.alive = False

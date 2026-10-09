@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (QButtonGroup, QFrame, QGridLayout, QHBoxLayout,
 from . import uitheme
 from .cards import COST, Card, TIERS
 from .config import Config
+from .reveal import CardReveal
 
 
 def _faint(colour: str, alpha: float = 0.32) -> str:
@@ -110,7 +111,7 @@ class AlbumPanel(QWidget):
         self.setStyleSheet(uitheme.dialog_qss() + _tile_qss())
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
 
-        self._cards: list[Card] = list(self.album.all_cards())
+        self._cards: list[Card] = list(self.album.shelf())
         self._page = 0
         self._selected: str | None = None
         self._icons: dict[str, QPixmap] = {}       # 缩略图缓存（按卡 id）
@@ -136,6 +137,12 @@ class AlbumPanel(QWidget):
         self.hint.setFont(uitheme.ui_font(9))
         root.addWidget(self.hint)
         root.addStretch(1)
+
+        # 抽卡翻牌浮层。**是卡册的子控件、不进布局**：铺满整册盖住所有按钮，
+        # 翻牌期间点不到「抽一次」，也就不会出现"动画没放完又抽一张"的错位。
+        # 理由与特效分档见 pet/reveal.py。
+        self.reveal = CardReveal(self)
+        self.reveal.hide()
 
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
@@ -174,9 +181,22 @@ class AlbumPanel(QWidget):
         coin_cap.setObjectName("hint")
         coin_cap.setFont(uitheme.ui_font(9))
 
+        #: 「仅看已有 / 看全部」开关。按钮上写的是**点下去会变成什么**，
+        #: 而不是当前状态 —— 写成当前状态的话，一句"仅看已有"既可能是
+        #: "现在只看已有"也可能是"点了只看已有"，点错一次就再也不敢点了。
+        self.mode = QPushButton("", self)
+        self.mode.setObjectName("chip")
+        self.mode.setFont(uitheme.ui_font(9))
+        self.mode.setFixedHeight(26)
+        self.mode.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.mode.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mode.clicked.connect(self._toggle_mode)
+
         row.addWidget(title)
         row.addSpacing(8)
         row.addWidget(self.progress)
+        row.addSpacing(8)
+        row.addWidget(self.mode)
         row.addStretch(1)
         row.addWidget(coin_cap, 0, Qt.AlignmentFlag.AlignBottom)
         row.addWidget(self.money)
@@ -395,8 +415,23 @@ class AlbumPanel(QWidget):
             return
         tag = "新收集！" if pull.is_new else f"重复（已有 {pull.dup_count} 张）"
         self.result.setText(f"抽到 {self._label(pull.card)}　{tag}")
-        self._selected = pull.card.id
-        self._page = self._index_of(pull.card.id) // self.PAGE
+        self._focus(pull.card.id)
+        # 翻牌浮层压轴出场 —— 它是这一下唯一抢眼的东西，也是整套系统里唯一
+        # 能让人"当场看出稀有度"的反馈（图鉴里的配色是静态的）。
+        self.reveal.show_card(pull.card, self._label(pull.card),
+                              self._thumb(pull.card.id),
+                              is_new=pull.is_new, dup_count=pull.dup_count)
+
+    def _focus(self, cid: str) -> None:
+        """选中某张卡，并把卡册翻到它所在的那一页。
+
+        **必须先 refresh 再算页号**：卡册可能正过滤着"只看已有"，刚抽到的
+        新卡是这一下才进列表的 —— 拿旧列表算出来的页号会指向别的卡，
+        于是"抽到了却看不见它在哪"。
+        """
+        self._selected = cid
+        self.refresh()
+        self._page = self._index_of(cid) // self.PAGE
         self.refresh()
 
     def _index_of(self, cid: str) -> int:
@@ -411,14 +446,12 @@ class AlbumPanel(QWidget):
             self.result.setText(trade.reason)
         elif trade.card is None:
             self.result.setText("兑换失败")
+        elif trade.is_new:
+            self.result.setText(f"换到 {self._label(trade.card)}　新收集！")
+            self._focus(trade.card.id)
         else:
-            if trade.is_new:
-                self.result.setText(f"换到 {self._label(trade.card)}　新收集！")
-                self._selected = trade.card.id
-                self._page = self._index_of(trade.card.id) // self.PAGE
-            else:
-                self.result.setText(
-                    f"换到 {self._label(trade.card)}　重复，返还 {trade.refund} 碎片")
+            self.result.setText(
+                f"换到 {self._label(trade.card)}　重复，返还 {trade.refund} 碎片")
         self.refresh()
 
     def _convert(self) -> None:
@@ -470,6 +503,11 @@ class AlbumPanel(QWidget):
             self.gacha.setEnabled(False)
             return
 
+        # 列表按当前模式重算（可能刚切过模式、也可能刚抽到第一张卡），
+        # 再钳一次页号 —— "只看已有"下页数会突然变小，不钳就会停在空白页上。
+        self._cards = list(album.shelf(self.cfg.album_owned_only))
+        self._page = max(0, min(self._page, self._page_count() - 1))
+
         self.money.setText(str(self.cfg.coins))
         self.progress.setText(
             f"已收集 {album.owned_kinds()} / {album.total_kinds()}　"
@@ -506,9 +544,29 @@ class AlbumPanel(QWidget):
         self._group.setExclusive(True)
 
     def _refresh_pager(self) -> None:
-        self.page_label.setText(f"第 {self._page + 1} / {self._page_count()} 页")
+        only = self.cfg.album_owned_only
+        self.mode.setText("看全部" if only else "仅看已有")
+        self.mode.setToolTip("切回整本图鉴（没抽到的是剪影）" if only
+                             else "只显示已经抽到的卡")
+        if not self._cards:
+            # 只看已有 + 一张都没有。这不是出错，是新手第一眼看到的状态，
+            # 所以给一句人话，而不是"第 1 / 1 页"配一个空白的九宫格。
+            self.page_label.setText("还没有卡　先抽一张")
+        else:
+            self.page_label.setText(f"第 {self._page + 1} / {self._page_count()} 页")
         self.prev.setEnabled(self._page > 0)
         self.next.setEnabled(self._page + 1 < self._page_count())
+
+    def _toggle_mode(self) -> None:
+        """在"整本图鉴"和"只看已有"之间切，并把选择写进存档。
+
+        页号一定归零：两个模式的列表长度根本不同，原来的第 5 页在新列表里
+        指向的是另一批卡 —— 保留页号会让用户以为"切换把卡换掉了"。
+        """
+        self.cfg.album_owned_only = not self.cfg.album_owned_only
+        self.cfg.save()
+        self._page = 0
+        self.refresh()
 
     def _refresh_money_rows(self) -> None:
         album = self.album
