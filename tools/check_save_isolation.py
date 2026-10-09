@@ -27,6 +27,18 @@
 （``verify_actions`` / ``verify_desktop`` / ``verify_facing``）。它**能过检查但会
 被提示** —— 中途抛异常或被 Ctrl-C 时，还原那段代码执行不到，存档照样丢。
 
+第二条检查：**隔离期间不许直接用 ``pet_asset_dir()`` 取素材**
+----------------------------------------------------------------
+
+隔离会把**整个可写数据目录**换到临时目录，而素材目录是从它推导出来的
+（``user_asset_dir("pet") = data_dir()/"custom_pet"``）—— 于是隔离之后
+``pet_asset_dir()`` 退到内置的 ``assets/pet/``，而**那儿是空的**（贴图全在
+项目根的 ``custom_pet/``）。
+
+这种错**不崩、只画空**：渲染出来一只空白狗，而"空 vs 空"照样相等，
+朝向/动作/像素比对会**安静地全部通过**。要渲染狗狗的脚本必须用
+``_isolate.source_asset_dir()`` 去读玩家那份只读素材。
+
 跑法：
 
     python tools/check_save_isolation.py
@@ -49,6 +61,23 @@ STRONG = ("isolate_storage(", "config_path =", "isolate_config(")
 #: 弱隔离：备份-还原。能过，但会被点名。
 WEAK = ("变了就还原", "已还原为运行前的版本")
 
+#: 第二类问题：**隔离期间直接用素材目录函数取素材**。
+#:
+#: ``pet_asset_dir()`` / ``game_asset_dir()`` 走"用户目录有素材就整体接管，
+#: 否则用内置目录"，而**用户目录是从可写数据目录推导的**
+#: （``user_asset_dir("pet") = data_dir()/"custom_pet"``）。隔离一开，
+#: 那个目录不存在 ⇒ 退到内置的 ``assets/pet/`` ⇒ 而它是**空的**
+#: （贴图全在项目根的 ``custom_pet/``，见 FACTS.md 的 F2/F26）。
+#:
+#: 症状不是崩，是**静默画空**：渲染出来一只空白狗，而"空 vs 空"照样相等 ——
+#: 朝向比对 / 动作比对 / 像素比对全部变成"空比空然后通过"。
+#: 2026-10-09 就是这么发现 ``verify_facing`` / ``verify_actions`` 在 v2.3.1
+#: 换强隔离时被弄哑的。
+READS_ASSETS = ("pet_asset_dir(", "game_asset_dir(", "card_asset_dir(")
+
+#: 隔离期间读只读素材的正确入口。
+SAFE_ASSET_DIR = "source_asset_dir("
+
 #: 不参与检查的文件。
 #:   ``repair_save.py`` 是**故意**要动真存档的修档工具（它干的就是这件事），
 #:   所以豁免 —— 它自己也带"桌宠还开着就拒绝执行"的保护。
@@ -69,6 +98,27 @@ def protected(src: str) -> tuple[bool, bool]:
     return strong, (weak and not strong)
 
 
+def asset_dir_problem(src: str) -> str | None:
+    """隔离之后还用 ``pet_asset_dir()`` 之类取素材 —— 会读到空目录、画出来是空白。
+
+    **只对 ``isolate_storage()`` 判**，不对"改 ``config_path``"那两种判：
+    只有 ``isolate_storage`` 会把**整个可写数据目录**换掉（``data_dir()`` 跟着走），
+    素材目录才因此失联。``config_path = lambda: tmp`` 和 ``isolate_config()``
+    只换存档文件，``data_dir()`` 仍是项目根，``pet_asset_dir()`` 一切正常 ——
+    把它们一起报出来只会淹掉真问题（实测会误报 10 个脚本）。
+    """
+    if "isolate_storage(" not in src:
+        return None
+    if SAFE_ASSET_DIR in src:
+        return None
+    hit = next((a for a in READS_ASSETS if a in src), None)
+    if hit is None:
+        return None
+    return (f"隔离后仍用 {hit.rstrip('(')}() 取素材：它会指向空的内置目录，"
+            f"渲染出来是空白，而'空比空'照样相等 ⇒ 比对会假通过。"
+            f"改用 source_asset_dir()")
+
+
 def scan() -> list[tuple[str, str]]:
     """扫一遍 ``tools/*.py``，返回 ``[(文件名, 问题描述)]``。"""
     problems: list[tuple[str, str]] = []
@@ -83,21 +133,37 @@ def scan() -> list[tuple[str, str]]:
             problems.append((path.name, "只做了备份-还原（中途崩溃/Ctrl-C 时仍会丢档）"))
         elif not strong:
             problems.append((path.name, "漏了隔离（会直接改玩家的 config.json）"))
+        trap = asset_dir_problem(src)
+        if trap:
+            problems.append((path.name, trap))
     return problems
 
 
 def self_test() -> list[str]:
-    """先证明这条检查不是摆设：拿一段"会碰存档但没隔离"的假源码喂它。
+    """先证明这条检查不是摆设：拿"会碰存档但没隔离"的假源码喂它。
 
     一个永远返回"通过"的检查比没有检查更糟 —— 它会让人以为安全。
     """
     bad = ["cfg = Config()", "pet = PetWindow(cfg, bank)"]
     ok = ["isolate_storage('x')", "cfg = Config()"]
+    trap = ["isolate_storage('x')", "bank = AssetBank(pet_asset_dir()).load()"]
+    fixed = ["isolate_storage('x')",
+             "bank = AssetBank(source_asset_dir('pet')).load()"]
+    # 只改 config_path 的脚本**不该**被判素材问题：data_dir() 没动，
+    # pet_asset_dir() 照样能读到项目根的 custom_pet/。放进来锁住这条精度。
+    weak_ok = ["pcfg.config_path = lambda: tmp",
+               "bank = AssetBank(pet_asset_dir()).load()"]
     out = []
     if protected("\n".join(bad))[0]:
         out.append("自检失败：没隔离的样本被判成了合格")
     if not protected("\n".join(ok))[0]:
         out.append("自检失败：隔离了的样本被判成了不合格")
+    if not asset_dir_problem("\n".join(trap)):
+        out.append("自检失败：隔离后直接读 pet_asset_dir 的样本没被抓出来")
+    if asset_dir_problem("\n".join(fixed)):
+        out.append("自检失败：用了 source_asset_dir 的样本被判成了有问题")
+    if asset_dir_problem("\n".join(weak_ok)):
+        out.append("自检失败：只改 config_path 的样本被误判成素材问题（会淹掉真问题）")
     return out
 
 

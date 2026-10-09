@@ -528,7 +528,11 @@ desktop-pet/
 │   └── verify_*.py          专项验收：桌面 / 朝向 / 两个动作 / 多套素材 / 走路两套 / 重力
 │                            / 甩出去 / 养成曲线 / 接狗狗道具 / v2.1.0 与 v2.2.0 界面
 │                            （v2.2.0 后新增 `verify_v22_ui.py`，v2.3.0 后新增
-│                             `verify_album_ui.py` —— 后者会顺手把卡册与徽章栏截图存到 reports/）
+│                             `verify_album_ui.py` —— 后者会顺手把卡册与徽章栏截图存到 reports/，
+│                             v2.4.0 后新增 `verify_nap_ui.py` —— 出「去睡一会儿」的菜单与睡姿实拍）
+│
+│   ⚠ 会渲染狗狗的验收脚本要用 `_isolate.source_asset_dir()` 取素材，
+│     不能用 `pet_asset_dir()` —— 理由见 `tools/_isolate.py` 里那个函数的说明。
 │
 ├── assets/                  ── 资源目录（只读，随程序走）
 │   ├── icon.png / icon.ico  ★ 应用图标：托盘 / 小游戏窗口 / 任务栏共用

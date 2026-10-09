@@ -28,6 +28,11 @@
 之后再 ``Config()`` / ``PetWindow(...)`` 就只会动临时目录里的文件，
 跑完自动删掉（进程退出时）。真存档一个字节都不会碰。
 
+**但要渲染狗狗的脚本注意**：素材目录是从数据目录推导出来的，隔离之后
+``pet_asset_dir()`` 会指向空目录，渲染出来是一只空白狗（而且"空比空"照样
+相等，断言会静默通过）。那种脚本要用 :func:`source_asset_dir` 拿玩家的
+只读素材，例如 ``AssetBank(source_asset_dir("pet")).load()``。
+
 ``tools/check_save_isolation.py`` 会静态检查有没有脚本忘了调它。
 """
 
@@ -73,3 +78,31 @@ def assert_isolated() -> Path:
             "先在造 Config/PetWindow 之前调用 _isolate.isolate_storage()。"
         )
     return here
+
+
+def source_asset_dir(name: str = "pet") -> Path:
+    """隔离期间，**玩家真正的那份只读素材**在哪儿。
+
+    隔离是把整个可写数据目录换到临时目录（见 ``pet/paths.py`` 的
+    ``DESKTOP_PET_DATA_DIR``）。但素材目录**是从数据目录推导出来的**
+    （``user_asset_dir("pet") = data_dir()/"custom_pet"``）—— 于是隔离之后
+    ``pet_asset_dir()`` 会退到内置目录 ``assets/pet/``，而那儿**是空的**
+    （狗狗的贴图一直在项目根的 ``custom_pet/``）。
+
+    后果很隐蔽：**渲染出来的是一只空白狗，而"空白 vs 空白"照样相等** ——
+    方向比对、动作比对、像素比对全部变成"空比空"然后"通过"。
+    2026-10-09 就是这么发现 ``verify_facing`` / ``verify_actions`` 在
+    v2.3.1 换强隔离时被弄哑的。
+
+    **读**只读素材不会伤害玩家（写才要隔离），所以这里临时把开关摘掉、
+    按生产环境的规则解析一次，再把开关放回去 —— 复用 ``resolve_asset_dir``
+    那套"用户目录有素材就整体接管"的判定，而不是在这儿抄一份。
+    """
+    from pet.paths import DESKTOP_PET_DATA_DIR_ENV, resolve_asset_dir
+
+    saved = os.environ.pop(DESKTOP_PET_DATA_DIR_ENV, None)
+    try:
+        return resolve_asset_dir(name)
+    finally:
+        if saved is not None:
+            os.environ[DESKTOP_PET_DATA_DIR_ENV] = saved

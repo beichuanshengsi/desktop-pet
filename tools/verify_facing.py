@@ -27,7 +27,8 @@ for _p in (str(ROOT), str(HERE)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from _isolate import assert_isolated, isolate_storage            # noqa: E402
+from _isolate import (assert_isolated, isolate_storage,              # noqa: E402
+                      source_asset_dir)
 
 #: 存档隔离 —— **必须排在造 PetWindow 之前**。这个脚本会 new 真窗口来渲染
 #: "向左走/向右走"，窗口的自动落盘会把一份临时 cfg 写进玩家的存档。
@@ -43,7 +44,6 @@ from pet import facing as facinglib                               # noqa: E402
 from pet.assets import AssetBank, set_files                       # noqa: E402
 from pet.behavior import State                                    # noqa: E402
 from pet.config import Config
-from pet.paths import pet_asset_dir                                     # noqa: E402
 from pet.window import PetWindow                                  # noqa: E402
 
 TMP = Path(tempfile.mkdtemp(prefix="pet_facing_"))     # 两帧渲染的落脚处，收尾会删
@@ -145,7 +145,11 @@ def main() -> int:
     # 存档已经换到临时目录了（见文件开头的 isolate_storage），这个脚本 new
     # 出来的真窗口怎么存盘都落不到玩家的 config.json 上。
 
-    pet_dir = pet_asset_dir()
+    # 素材目录**不能**用 pet_asset_dir()：它是由可写数据目录推导出来的，
+    # 而这里已经把数据目录换到临时目录了 ⇒ 会退到内置的 assets/pet/（空的），
+    # 渲染出来是一只空白狗，"空白 vs 空白"照样相等、比对就白做了。
+    # source_asset_dir 专门解决这件事（读玩家的只读素材，不受隔离影响）。
+    pet_dir = source_asset_dir("pet")
     base = facinglib.current()
     sets = facinglib.read_sets(pet_dir)
 

@@ -1249,8 +1249,9 @@ tile   最大 2048     62 / 71  <- 超了！
 - 证据：`grep -n "__version__" pet/__init__.py` → `2.4.0`
 - 证据：`grep -n "AppVer" installer.iss` → `#define AppVer "2.4.0"`
 - 证据：`grep -m1 "^## v" CHANGELOG.md` → `## v2.4.0 — 2026-10-09 · 「去睡一会儿」…`
-- 证据：`python tools/smoke_test.py` → `通过 450 项，失败 0 项 / 全部通过`
-  （v2.4.0 新增 19 条，段名 `主动小睡（去睡一会儿）`）
+- 证据：`python tools/smoke_test.py` → `通过 453 项，失败 0 项 / 全部通过`
+  （v2.4.0 新增 22 条：`主动小睡（去睡一会儿）` 段 19 条 + `存档隔离与每日快照`
+  段里钉 `source_asset_dir()` 的 3 条）
 - 证据：`python tools/typecheck.py` → `0 errors, 0 warnings, 0 informations`
 - 证据（总账等价，逐项相等）：同样从精力 25 睡到 82 ——
   主动小睡 `3.17` 分钟 → `精力 82.00 / 心情 51.710 / 饱食 23.100`；
@@ -1262,6 +1263,52 @@ tile   最大 2048     62 / 71  <- 超了！
 **版本号为什么是 2.4.0 而不是 2.3.2**：按 `CHANGELOG.md` 开头的规则，
 判断标准是"用户能不能明显感知到"—— 这轮**多了一个菜单入口和一种可见行为**
 （点了它当场趴下、睡姿贴图会播），属于"加功能" → MINOR。
+
+### F33 · 强隔离会把"用户的只读素材"一起挪走（v2.4.0 发现，坑在 v2.3.1 埋下）
+
+**事实**：隔离用的环境变量 `DESKTOP_PET_DATA_DIR` 换的是**整个可写数据目录**，
+而素材目录是**从它推导出来的**：`user_asset_dir("pet") = data_dir()/"custom_pet"`。
+⇒ 一旦隔离，`pet_asset_dir()` 就退到内置的 `assets/pet/`，而**那儿是空的**
+（183 张贴图全在项目根的 `custom_pet/`，见 F1 / F2）。
+
+**后果不是崩，是静默画空**：渲染出来一只空白狗，而"空 vs 空"照样相等 ——
+朝向比对 / 动作比对 / 像素比对会**安静地全部通过**。
+
+**受害者（v2.3.1 把它们的"备份-还原"换成强隔离时弄哑的）**：
+`verify_facing.py` / `verify_actions.py` / `verify_desktop.py`。
+（`verify_facing` 至少会打印"没找到 walk 素材"然后退出 1；`verify_actions`
+当时连这句都没有，连拍出来是一整页空白狗。）
+
+**修法**：`tools/_isolate.source_asset_dir(name)` —— 临时摘掉那个环境变量、
+按生产规则解析一次再放回去，**复用 `resolve_asset_dir` 的"用户目录整体接管"判定**
+（不在这儿抄第二份）。读只读素材不会伤存档，所以隔离本身不用动。
+`check_save_isolation.py` 加了一条静态检查：**凡用了 `isolate_storage()` 又直接
+用 `pet_asset_dir()` / `game_asset_dir()` / `card_asset_dir()` 的脚本一律报错**。
+
+- 证据（修前 vs 修后，隔离状态下）：`pet_asset_dir()` → `assets\pet`，
+  `AssetBank(...).load().count("idle")` = **0**；
+  `source_asset_dir("pet")` → `custom_pet`，`count("idle")` = **17**、`count("sleep")` = **22**
+- 证据：`python tools/verify_facing.py` → 第一行 `[验收] 素材目录 : custom_pet`
+  （修前会是 `assets\pet`，随后报"没找到 walk 素材"）
+- 证据：`python tools/check_save_isolation.py` → `全部通过`
+- **检查精度**：只对 `isolate_storage()` 判，不对"改 `config_path`"判 ——
+  后者只换存档文件、`data_dir()` 不动，素材照读。一起报会**误伤 10 个脚本**
+  （实测：render_preview / smoke_test / verify_catch_items / verify_fling /
+  verify_gravity / verify_v21_ui / verify_v22_ui / verify_variants /
+  verify_vitals / verify_walk_sets）。这条精度由检查器自检锁住。
+
+### F34 · 卡册 4 张验收截图原本每次跑都不一样（v2.4.0 顺手修）
+
+`verify_album_ui.py` **先抽 40 次卡再截图**，而 `Album` 默认用真的 `random.Random()`
+⇒ 抽到什么直接决定截图内容。实测同一份代码连跑两次，`卡册_第1页.png` 有
+**61067 / 567300 ≈ 10.76%** 的像素不同；尺寸相同（620×915），所以不是分辨率问题。
+
+**修法**：`Album` 本来就留了 `rng` 注入口（`pet/cards.py` 的
+`Album.__init__(cfg, rng=None, ...)`），脚本里钉一个固定种子即可。
+
+- 证据：`pet.album.rng = random.Random(20261009)` 之后，连跑两次四张图 sha256 前 16 位
+  完全一致（`4f8e65cf4663125d` / `5ec67e9f4166f4db` / `4f17563c88628f0d` / `906598c090ff628d`）
+- 反例（修前）：同代码连跑两次 → `6d59caf26147f177` vs `2ae1266e105ad302`
 
 ## 二、推断区（每条附证伪命令；给不出证伪方法的推断不许留）
 

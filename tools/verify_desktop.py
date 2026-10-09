@@ -22,7 +22,8 @@ for _p in (str(ROOT), str(HERE)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from _isolate import assert_isolated, isolate_storage            # noqa: E402
+from _isolate import (assert_isolated, isolate_storage,          # noqa: E402
+                      source_asset_dir)
 
 #: 存档隔离 —— **必须排在造 PetWindow 之前**。这个脚本会 show() 真窗口、还会
 #: close()，两条路都会写 config.json；不隔离的话玩家的位置/投喂次数/最高分
@@ -36,7 +37,6 @@ from PySide6.QtWidgets import QApplication                       # noqa: E402
 
 from pet.assets import AssetBank                                 # noqa: E402
 from pet.config import Config
-from pet.paths import pet_asset_dir                          # noqa: E402
 from pet.window import PetWindow                                 # noqa: E402
 
 #: 和其它验收脚本保持一致，产物落进 reports/（reports/README.md 里按这个目录列了清单）
@@ -54,14 +54,19 @@ def main() -> int:
 
     # 贴图现在只来自素材目录，不再有"代码画的兜底风格"生成这一步。
     # 目录空着就直说，别让人对着一张透明截图排查。
-    if not any(pet_asset_dir().glob("*.png")):
-        print(f"[verify] 素材目录 {pet_asset_dir()} 是空的，先放贴图再跑这个脚本")
+    #
+    # 注意这里用 source_asset_dir 而不是 pet_asset_dir：后者从可写数据目录推导，
+    # 而本脚本开头已经把数据目录换到临时目录了 —— 用它只会永远指向空目录，
+    # 于是这个守卫会把"隔离导致的空目录"误报成"用户还没放贴图"。
+    pet_dir = source_asset_dir("pet")
+    if not any(pet_dir.glob("*.png")):
+        print(f"[verify] 素材目录 {pet_dir} 是空的，先放贴图再跑这个脚本")
         return 1
 
     cfg = Config()
     cfg.pos_x = cfg.pos_y = -1          # 用默认位置，别污染用户存档
     cfg.topmost = True
-    bank = AssetBank(pet_asset_dir()).load()
+    bank = AssetBank(pet_dir).load()
 
     pet = PetWindow(cfg, bank)
     pet.show()

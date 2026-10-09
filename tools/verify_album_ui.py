@@ -18,6 +18,7 @@ v2.3.0 刚发布时这里漏了这一步，跑一次验证就往玩家卡册里�
 from __future__ import annotations
 
 import os
+import random
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -28,7 +29,8 @@ for _p in (str(ROOT), str(HERE)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from _isolate import assert_isolated, isolate_storage               # noqa: E402
+from _isolate import (assert_isolated, isolate_storage,             # noqa: E402
+                      source_asset_dir)
 
 #: 存档隔离 —— **必须排在所有 pet.* 导入和一切 Config()/PetWindow() 之前**。
 STORAGE = isolate_storage("album_ui")
@@ -41,7 +43,6 @@ from PySide6.QtWidgets import QApplication, QWidgetAction    # noqa: E402
 from pet.assets import AssetBank                            # noqa: E402
 from pet.badge_bar import BadgeBar                          # noqa: E402
 from pet.config import STAMP_FMT, Config                    # noqa: E402
-from pet.paths import pet_asset_dir                         # noqa: E402
 from pet.window import PetWindow                            # noqa: E402
 
 FAILS: list[str] = []
@@ -66,8 +67,16 @@ def main() -> int:
 
     cfg = Config()
     cfg.coins = 5000
-    bank = AssetBank(pet_asset_dir()).load()
+    # 素材目录用 source_asset_dir 而不是 pet_asset_dir：后者由可写数据目录推导，
+    # 已经被上面的隔离换到临时目录了，会退到**空的**内置目录 assets/pet/，
+    # 于是一只狗都画不出来（本脚本只看卡册界面，所以不会报错，但没必要留个假窗口）。
+    bank = AssetBank(source_asset_dir("pet")).load()
     pet = PetWindow(cfg, bank)
+    # 抽卡换成固定种子：这个脚本先抽 40 次来验经济参数，**抽到什么直接决定
+    # 截图内容** —— 不固定的话每次跑出来的卡册图都不一样（实测同一份代码连跑
+    # 两次，`卡册_第1页.png` 就有 10% 的像素不同），既没法比对、也没法说"可复现"。
+    # `Album` 本来就支持注入 rng（见 pet/cards.py），这里只是把种子钉住。
+    pet.album.rng = random.Random(20261009)
 
     print("\n[1] 右键菜单里的徽章栏")
     menu = pet._build_menu()

@@ -195,6 +195,25 @@ def main() -> int:
         backuplib._prune()
         check("太旧的快照会被清掉", not stale.exists())
         check("当天的快照留着", snap is not None and snap.exists())
+
+        # ---- 隔离期间怎么读"玩家的只读素材"
+        # 素材目录是从可写数据目录推导的（user_asset_dir("pet") = data_dir()/"custom_pet"），
+        # 所以上面那个环境变量一设，pet_asset_dir() 就退到内置的 assets/pet/ —— 而那里是空的。
+        # 症状不是崩，是**静默画空**：渲染出来一只空白狗，而"空 vs 空"照样相等，
+        # 朝向/动作/像素比对全部变成"空比空然后通过"。2026-10-09 就是这么发现
+        # verify_facing / verify_actions 在 v2.3.1 被弄哑的。
+        from _isolate import source_asset_dir
+        from pet.paths import pet_asset_dir as pet_dir_now
+
+        real_pet = source_asset_dir("pet")
+        bank_real = AssetBank(real_pet).load()
+        check("source_asset_dir() 仍指向玩家的那份只读素材（含 idle 帧）",
+              real_pet.is_dir() and any(real_pet.glob("idle_*.png")), str(real_pet))
+        check("用它建出来的素材库有帧（拿它渲染才不会是一张空白狗）",
+              bank_real.count("idle") > 0, f"idle {bank_real.count('idle')} 帧")
+        check("隔离后默认的 pet_asset_dir() 已经不通向玩家的素材目录（坑就在这）",
+              pet_dir_now().resolve() != real_pet.resolve(),
+              f"{pet_dir_now()} vs {real_pet}")
     finally:
         if keep_env is None:
             os.environ.pop(DESKTOP_PET_DATA_DIR_ENV, None)

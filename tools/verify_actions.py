@@ -19,7 +19,8 @@ for _p in (str(ROOT), str(HERE)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from _isolate import assert_isolated, isolate_storage            # noqa: E402
+from _isolate import (assert_isolated, isolate_storage,              # noqa: E402
+                      source_asset_dir)
 
 #: 存档隔离 —— **必须排在造 PetWindow 之前**。这个脚本会 show() 真窗口并连拍，
 #: 窗口的自动落盘会把一份临时 cfg 写进存档，把玩家的位置/投喂次数盖成默认值。
@@ -32,7 +33,6 @@ from PySide6.QtWidgets import QApplication                       # noqa: E402
 
 from pet.assets import AssetBank                                 # noqa: E402
 from pet.config import Config
-from pet.paths import pet_asset_dir                                     # noqa: E402
 from pet.window import PetWindow                                 # noqa: E402
 
 from PIL import Image, ImageDraw, ImageFont                      # noqa: E402
@@ -97,9 +97,16 @@ def main() -> int:
     cfg.pos_x, cfg.pos_y = 120, 620      # 固定落点：避开用户自己那只宠物常待的位置
     cfg.auto_walk = False                # 别在连拍期间自己走开
     cfg.topmost = True
-    bank = AssetBank(pet_asset_dir()).load()
+    # 素材目录用 source_asset_dir 而不是 pet_asset_dir：后者从可写数据目录推导，
+    # 已经被隔离换到临时目录了，会退到空的内置目录 ⇒ 连拍出来是一张空白狗，
+    # 而这种"空图"照样能存能看，光看截图不容易发觉。
+    bank = AssetBank(source_asset_dir("pet")).load()
     check = [(s, bank.count(s)) for s in ("poke", "feed")]
     print(f"[verify] 素材帧数 {check}")
+    if not all(n > 0 for _s, n in check):
+        print("[verify] 没有读到 poke / feed 素材，连拍出来会是空白狗。"
+              "先确认项目根的 custom_pet/ 里有贴图。")
+        return 1
 
     pet = PetWindow(cfg, bank)
     pet.show()

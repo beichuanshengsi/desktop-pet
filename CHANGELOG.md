@@ -45,6 +45,25 @@ v 主版本 . 次版本         例如 v0.7.1
 | `pet/behavior.py` | 新增 `Brain.sleep_now()`（强制入睡，不看 `tired`）、`napping` 属性、`NAP_MIN_SECONDS = 60.0`；`update()` 的 `SLEEP` 分支多加一道"最短时长"闸门 |
 | `pet/window.py` | 新增 `NapPlan` / `nap_plan()` / `nap()`；`_tick_vitals()` 在 `brain.napping` 时按 `NAP_BOOST` 推进 |
 | `pet/menu.py` | 新增 `nap_text()` 与 `_NapPlan` Protocol，接进 `add_interactions()` —— 排在「逗它玩」之后、喂一口之前（它是"照顾"里最轻的一个：不花钱、不耗背包） |
+| `tools/verify_nap_ui.py` **新** | 「去睡一会儿」的无头验收 + 截图（15 项）：菜单那一行的两态、睡姿与站姿**逐像素比对**、起床用时短于自然睡 |
+
+**顺手修掉的两处（都不是这一版引入的，是这一版才看见）**
+
+* **v2.3.1 的强隔离把三个验收脚本弄哑了**（`verify_facing` / `verify_actions` /
+  `verify_desktop`）。隔离会把**整个可写数据目录**换到临时目录，而素材目录是
+  从它推导出来的（`user_asset_dir("pet") = data_dir()/"custom_pet"`）——
+  于是隔离之后 `pet_asset_dir()` 退到内置的 `assets/pet/`，而**那儿是空的**
+  （贴图全在项目根的 `custom_pet/`）。
+  症状**不崩、只画空**：渲染出来一只空白狗，而"空 vs 空"照样相等 ⇒ 朝向比对、
+  动作比对、像素比对**安静地全部通过**。这正是"测试全绿但什么都没验"那类问题。
+  修法：`_isolate.source_asset_dir()`（读玩家的**只读**素材，读不伤存档），
+  并在 `check_save_isolation.py` 里加一条静态检查 —— **凡用了 `isolate_storage()`
+  又直接用 `pet_asset_dir()` 的脚本一律报错**（带自检；只改 `config_path` 的脚本
+  不受影响，实测若一起报会误伤 10 个文件）。
+* **卡册那 4 张验收截图每次跑都不一样**。原因是脚本先抽 40 次卡再截图，而
+  抽卡用的是真随机 —— 实测同一份代码连跑两次，`卡册_第1页.png` 就有 **10%**
+  的像素不同，既没法比对、也说不上"可复现"。修法：给 `Album` 注一个固定种子的
+  `random.Random`（`pet/cards.py` 本来就留了这个口子）。
 
 **两个设计取舍（都不是随手定的）**
 
@@ -63,14 +82,17 @@ v 主版本 . 次版本         例如 v0.7.1
 
 **怎么验证**
 
-* `tools/smoke_test.py` 新增 19 条断言（总数 431 → **450**）：`sleep_now` 不看
+* `tools/smoke_test.py` 新增 22 条断言（总数 431 → **453**）：`sleep_now` 不看
   `tired`、最短时长闸门（睡 10 秒不醒、躺够 60 秒才醒）、醒来后标记要清掉
   （不清的话下一觉会白捡加速）、自然睡不受影响、**窗口层"同样 190 秒：主动小睡
   已起身而自然睡还趴着"**、三项总账与自然睡逐项一致、三种"点不了"各给一句原因、
-  菜单那一行跟着灰掉/可点。
+  菜单那一行跟着灰掉/可点；另加 3 条钉住 `source_asset_dir()`（隔离期间默认入口
+  读不到狗、它仍能读到、用它建的素材库有帧）。
+* `tools/verify_nap_ui.py` **新**，15 项，出 `reports/小睡_*.png`。
+* `tools/verify_facing.py` 修好后重跑：素材目录正确指向 `custom_pet`，两套朝向都通过。
 * `typecheck` 0 error；`check_cards` 51 项 / `verify_album_ui` 24 项 /
-  `check_save_isolation` 全过（无回归）。
-* 跑完整套测试后，玩家 `config.json` 一个字节没动。
+  `check_save_isolation` 全过，且四张卡册截图改为**可复现**。
+* 跑完整套测试后，玩家 `config.json` 一个字节没动（sha256 前后一致）。
 
 **附**：`NAP_BOOST` 是这一版唯一的数值旋钮。嫌 3 分钟还是久就调大它，
 嫌"睡得太快、没仪式感"就调小到 2.0；`NAP_MIN_SECONDS` 管的是"最短躺多久"。
