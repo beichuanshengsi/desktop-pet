@@ -13,7 +13,29 @@
 
 ---
 
-## 快速开始
+## 下载安装包（Windows）
+
+不想装 Python 环境的话，直接下安装包：
+
+**➡️ [下载最新版安装包](https://github.com/beichuanshengsi/desktop-pet/releases/latest)**
+
+当前 **v2.7.0**，单个 `setup.exe`、约 49 MB。安装包已自带全部贴图和
+102 张卡池，**不需要装 Python，也不需要联网**。
+
+安装时只有两个勾选项：桌面快捷方式（默认勾）、开机自动启动（默认不勾）。
+程序装在 `%LOCALAPPDATA%\Programs\小狗桌宠`，**全程不弹 UAC**；
+存档和卡册在 `%APPDATA%\DesktopPet\`，**卸载时不会被删**。
+
+> 首次运行若 Windows 弹「已保护你的电脑」：exe 没有代码签名证书，
+> 点**「更多信息」→「仍要运行」**即可。这是 SmartScreen 对未签名程序的通用提示，
+> 不是杀毒报毒。
+>
+> 想换自己的形象，把 128×128 的 PNG 丢进 `%APPDATA%\DesktopPet\custom_pet\`
+> 就行（详见 [`custom_pet/README.md`](custom_pet/README.md)）。
+
+---
+
+## 快速开始（源码运行）
 
 依赖已经装好了，直接跑就行。三种方式：
 
@@ -1021,21 +1043,50 @@ npm --prefix "$HOME/.workbuddy/binaries/node/workspace" install pyright
 
 ---
 
-## 打包成 exe
+## 打包成 exe / 安装包
+
+**先看这里**：仓库根的 **`installer.iss` 顶部注释里放着当前可用的完整打包命令**，
+要出安装包就照它跑。两条命令：
 
 ```bash
-pip install pyinstaller
-pyinstaller --noconsole --onefile --name DesktopPet ^
-  --add-data "assets;assets" ^
-  main.py
+# 1) PyInstaller 打成 onedir（注意素材要逐个 --add-data，别写 "assets;assets"）
+python -m PyInstaller --noconfirm --clean --name DesktopPet --windowed ^
+  --icon assets/icon.ico --distpath dist --workpath build ^
+  --add-data "assets/pet;assets/pet" --add-data "assets/game;assets/game" ^
+  --add-data "assets/fonts;assets/fonts" --add-data "assets/sfx;assets/sfx" ^
+  --add-data "assets/icon.ico;assets" --add-data "assets/icon.png;assets" ^
+  --add-data "assets/cards;assets/cards" ^
+  --add-data "custom_pet/*.png;assets/pet" ^
+  --add-data "custom_pet/facing.json;assets/pet" ^
+  --exclude-module tkinter main.py
+
+# 2) Inno Setup 编译安装包（用户级安装，不在 Program Files）
+"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer.iss
 ```
 
-三个坑：
+产出 `installer\小狗桌宠_v<版本>_安装包.exe`，约 49 MB。跑之前记得把
+`installer.iss` 里的 `#define AppVer` 和 `pet/__init__.py` 的 `__version__` 对齐。
 
-1. **素材路径**。`config.app_root()` 已经处理了冻结态（读 `sys._MEIPASS`），所以不用改代码；但如果你自己新加了按相对路径读文件的地方，记得走同一个函数。
-2. **存档位置**。冻结态下配置写到 `%APPDATA%\DesktopPet\`，因为程序目录通常不可写。
-3. **杀软误报**。PyInstaller 单文件包被 Windows Defender 拦是常态，给同学之前先说明。
-4. **体积**。PySide6 打进来约 60–100 MB，这是 Qt 的硬成本，压不下去。
+六个坑（前四条都是实测踩出来的）：
+
+1. **必须带 `assets/cards`**。v2.3.0 上了卡册之后，漏掉这一项打出来的包**没有卡册**；
+   而开发态直接读项目根，所以跑起来看不出问题 —— 一直到 v2.4.0 才补上。
+   `DesktopPet.spec` 里也曾漏过同一项，现在两边都是全的。
+2. **别用 `--onefile`**。PySide6 解包 150 MB 上下，单文件每次启动都要解到 `%TEMP%`，
+   慢好几秒；自解压行为还更容易被 Defender 拦。常驻型程序用 onedir。
+3. **别用 `--add-data "assets;assets"`**。它会把 `assets/raw/` 这类源素材归档一起打进去
+   （实测白胖 70 MB）。要逐个素材子目录指定。
+4. **别加 `--specpath`**。它会改变 `--add-data` 相对路径的解析基准，直接报
+   `Unable to find .../assets/pet`。想控制产物落点就用 `--distpath` / `--workpath`。
+5. **素材路径 / 存档位置不用改代码**：`pet/paths.py` 的 `app_root()` 已处理冻结态
+   （读 `sys._MEIPASS`），`data_dir()` 在冻结态写 `%APPDATA%\DesktopPet\`。
+   自己新加按相对路径读文件的地方，记得走同一个函数。
+   调试时可用环境变量 `DESKTOP_PET_DATA_DIR` 换掉整个数据目录。
+6. **杀软误报**。PyInstaller 打的包被 Windows Defender 拦是常态，给同学之前先说明一句。
+
+打完**先验一遍再发**：`dist\DesktopPet\_internal\PySide6\plugins\platforms\qwindows.dll`
+必须在（缺了换机器就报 no Qt platform plugin），
+`_internal\assets\pet\` 的 PNG 数要和 `custom_pet\` 一致。
 
 ---
 

@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets/pet', 'assets/pet'), ('assets/game', 'assets/game'), ('assets/fonts', 'assets/fonts'), ('assets/sfx', 'assets/sfx'), ('assets/icon.ico', 'assets'), ('assets/icon.png', 'assets'), ('custom_pet/*.png', 'assets/pet'), ('custom_pet/facing.json', 'assets/pet')],
+    datas=[('assets/pet', 'assets/pet'), ('assets/game', 'assets/game'), ('assets/fonts', 'assets/fonts'), ('assets/sfx', 'assets/sfx'), ('assets/icon.ico', 'assets'), ('assets/icon.png', 'assets'), ('assets/cards', 'assets/cards'), ('custom_pet/*.png', 'assets/pet'), ('custom_pet/facing.json', 'assets/pet')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
