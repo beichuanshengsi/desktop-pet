@@ -17,7 +17,14 @@
 
 不想装 Python 环境的话，直接下安装包：
 
-**➡️ [下载最新版安装包](https://github.com/beichuanshengsi/desktop-pet/releases/latest)**
+**➡️ [下载最新版安装包](https://github.com/beichuanshengsi/desktop-pet-releases/releases/latest)**
+
+> **安装包已经挪到独立的公开下载仓库**
+> [`beichuanshengsi/desktop-pet-releases`](https://github.com/beichuanshengsi/desktop-pet-releases)。
+> 本仓库（源码）是**私有**的，所以这里的 Releases 外人打不开 ——
+> 要发给别人，发上面那个链接，**不要**发本仓库的链接。
+
+下载页的 README 里写了给非技术用户看的逐步安装说明和常见问题。
 
 当前 **v2.7.0**，单个 `setup.exe`、约 49 MB。安装包已自带全部贴图和
 102 张卡池，**不需要装 Python，也不需要联网**。
