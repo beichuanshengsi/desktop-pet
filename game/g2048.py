@@ -43,6 +43,7 @@ from PySide6.QtGui import QColor, QFontMetricsF, QPainter, QPen
 from game.common import (BG_2048, HUD_H, W, H, GameWindow, load_background,
                          measure_zone_widest, paint_hud_bar, ui_font, zone_spans)
 from pet.assets import AssetBank
+from pet import sfx as sfxlib
 # 装备加成的乘法与"金币进存档"现在都在底座 ``_award_coins`` 里一份
 # （本款只覆盖 ``_round_coins`` 提供自己那把尺子），所以这里不再直接 import
 # ``coins_with_bonus`` —— 留着会让"加成只写一处"这个约定变得看不出来。
@@ -363,6 +364,10 @@ class Game2048(GameWindow):
         self._history.append((self.grid, self.score, self.undo_left))
         self.grid = spawn(nxt, self.rng)
         self.score += gained
+        # 合并出东西响"得分"，只是挪了个位置响轻轻的"滑一下"。
+        # 这一款一局要推几十上百步，每步都给一点声音才不至于闷；
+        # 但两种要分开 —— 每步都按得分音的话，"这一步真的合上了"就没感觉了。
+        sfxlib.play("score" if gained else "flip")
 
         # 只在这一步**真的推动了之后**才判"该不该收"：死局必然是
         # "某次成功的推送 + 冒新块"之后的产物，中途去判是白费。
@@ -447,7 +452,7 @@ class Game2048(GameWindow):
         self.over = True
         best = max(self.cfg.best_2048, self.score)
         self._record_best()
-        earned = self._award_coins()
+        earned = self._award_coins(announce=not early)
         self._flash = 1.0
 
         if early:

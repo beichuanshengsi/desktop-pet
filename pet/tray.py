@@ -93,6 +93,7 @@ class PetTray(QSystemTrayIcon):
         m.addSeparator()
 
         self._toggles = menulib.add_toggles(m, self.cfg, self.pet)
+        menulib.add_sfx_volume(m, self.cfg, self.pet)
 
         m.addSeparator()
         size_menu = m.addMenu("大小")
@@ -102,6 +103,9 @@ class PetTray(QSystemTrayIcon):
             size_menu.addAction(act)
 
         m.addAction("背包面板", self.pet.open_panel)
+        # 聊天：入口 + 设置，和右键菜单共用一份实现（``menu.add_chat``）。
+        # 托盘这边没有幼儿模式那层顾虑 —— 任务栏点出来的菜单，本来就不给小朋友。
+        menulib.add_chat(m, self.pet, self.cfg)
         m.addAction("回到默认位置", self.pet.reset_position)
         m.addSeparator()
         m.addAction("退出", self._on_quit)

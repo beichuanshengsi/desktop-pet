@@ -44,7 +44,9 @@ from PySide6.QtGui import QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import QMenu, QWidget
 
 from . import facing as facinglib
+from . import chatui
 from . import menu as menulib
+from . import sfx as sfxlib
 from . import uitheme
 from .album_panel import AlbumPanel
 from .anim import Animator
@@ -181,6 +183,25 @@ class PetWindow(QWidget):
         # 番茄钟。纯计时，到点发信号。
         self.pomodoro = Pomodoro()
 
+        #: 这一轮"饿了"报过没有。饱食从饿变不饿时复位 —— 用来把
+        #: 「讨饭」这件事从"每帧"压回"每次饥饿一次"（见 ``_steer_if_hungry``）。
+        self._hungry_announced = False
+
+        # 聊天（见 pet/chat.py 与 pet/chatui.py）。调度器本身不认识 Qt 窗口
+        # 之外的任何东西：它拿 ``self`` 当"会报状态的对象"用（vitals / brain /
+        # frameGeometry），所以这里传自己。**不在构造期读盘** —— 见
+        # ``ChatController.__init__`` 里那段说明。
+        self.chat = chatui.ChatController(self, self.cfg)
+
+        # 音效。**播放器是全程序一份**（``pet/sfx.py`` 的模块级实例），
+        # 这里只把存档里的开关与音量套上去 —— 调用点直接 ``sfxlib.play(...)``，
+        # 不需要各自持有对象，也就不会出现"某个面板漏读了音量"。
+        sfxlib.configure(cfg.sfx_enabled, cfg.sfx_volume)
+        # 顺手预热：把素材读进内存、**并且把音频设备开起来**。开设备要 300ms
+        # 上下，放在启动时没人察觉；不预热就是"第一次戳它"卡一下
+        # （见 ``pet/sfx.py`` 的 ``warmup``）。
+        sfxlib.warmup()
+
         # 素材原图朝哪边（-1 左 / 1 右）。读一次缓存住，绘制循环里不能读盘。
         # 同一个动作有好几套素材时，个别套的原图方向可能相反 —— 那份
         # "按套覆盖"表也在这里一次读完（见 facing.base_for）。
@@ -269,7 +290,22 @@ class PetWindow(QWidget):
             x = g.right() - self._size - 60
             y = g.bottom() - self._size
         self.body.w = self.body.h = float(self._size)
+        # 把摆放坐标**对齐到物理层认定的那条地面线**，两件事因此一起解决：
+        #
+        # 1. 差这 1 像素的话，摆完它总要往下掉一下 —— 而那一下会被物理层判成
+        #    "落地"，启动就平白响一声落地音，而玩家什么都没做（这是"没点它自己
+        #    也出声"的一处源头）；
+        # 2. ``teleport`` 只清速度、不碰 ``on_ground``，留着 False 同样会被判成
+        #    落地。
+        #
+        # 地面线是 ``_bounds()`` 的第 4 个值减去身高。``_bounds()`` 那边取的是
+        # ``bottom + 1``（窗口占的是半开区间），而默认摆放按 ``bottom - size``
+        # 算 —— 所以这两处本来就差 1 像素，只是加音效之前看不出来。
+        floor_y = float(g.bottom() + 1) - float(self._size)
+        if y >= floor_y - 1.0:                  # 本来就在地面上（1 像素以内）
+            y = int(floor_y)                    # 贴齐，别留那一次下落
         self.body.teleport(x, y)
+        self.body.on_ground = float(y) >= floor_y
         self.move(int(self.body.x), int(self.body.y))
 
     def reset_position(self) -> None:
@@ -319,6 +355,7 @@ class PetWindow(QWidget):
         Brain 那边比的是 ``seek_x - 当前位置``，两边得用同一把尺子。
         """
         if not self.vitals.hungry:
+            self._hungry_announced = False
             if self.brain.seeking:
                 self.brain.stop_seek()
             return
@@ -329,6 +366,15 @@ class PetWindow(QWidget):
         g = self._screen_available()
         if not self.brain.seeking:
             self.brain.start_seek(float(g.center().x()))
+            # 只在**第一次动身**那一刻记一笔，用显式标志而不是 ``brain.seeking``：
+            # 它本来就站在屏幕中间时，``start_seek`` 紧接着就被 ``update_seek``
+            # 判定"到了"并清掉 seeking，于是这个分支**每帧**都会进一次 ——
+            # 实测 60fps 下把账本 20 条容量全写成 ``hungry``，喂食、被甩的记录
+            # 全被挤掉，它自己聊起来也只看得见"我饿了"。
+            # 冷却表那边还挡着 10 分钟，所以开口本来就没刷屏，坏的是账本。
+            if not self._hungry_announced:
+                self._hungry_announced = True
+                self.chat.note_event("hungry")
         self.brain.update_seek(self.body.x + self._size / 2.0)
 
     # ================================================================ 番茄钟
@@ -379,6 +425,9 @@ class PetWindow(QWidget):
         ``main.py`` 调 ``pomodoro.describe`` 做 —— 说法只有那一份实现。
         """
         self.pomodoro_done.emit(int(round(self.pomodoro.total_seconds)))
+        # 声音先响：用户多半正低头干活，抬头看见它蹦之前先听见铃 ——
+        # 这一条比"蹦"覆盖的场景广得多（它可能被藏在托盘里，压根看不见）。
+        sfxlib.play("pomodoro")
         if self.brain.state in (State.DRAG, State.FALL):
             return
         self._begin_action(State.POKE)
@@ -411,6 +460,7 @@ class PetWindow(QWidget):
         n = self.bag.add(key)
         self._save_bag()
         self.cfg.save()
+        sfxlib.play("buy")
         # 告诉一声：菜单一收起就看不见了，不提示的话用户不确定买没买上
         self.notify.emit("已放进背包", f"{item.label} ×{n}（共 {self.bag.total()} 件）")
 
@@ -431,7 +481,16 @@ class PetWindow(QWidget):
         self._save_bag()
         self.cfg.save()
         self._play_gift(item.action)
+        # 吃的响"咀嚼"、玩的响"拿到手" —— 由商品自己那一栏 ``action`` 决定，
+        # 不在这里再维护一张 "key -> 音效" 的表（加了新商品就会漏改那张表）。
+        sfxlib.play("feed" if item.action == "feed" else "use_item")
         self.notify.emit("用掉一个", f"{item.label}（还剩 {self.bag.count(key)}）")
+        # 吃下去算「被喂了」、玩球算「被逗了」—— 按商品自己那一栏 action 分，
+        # 和上面选音效用的是同一个判断，不另建一张表。
+        # 商品自己声明了 ``event`` 就听它的（豪华大餐走 ``feast``：它不该和
+        # 随手一口的肉干共用 3 分钟冷却，否则花 30 金币可能一句都听不到）。
+        self.chat.note_event(item.event or
+                             ("feed" if item.action == "feed" else "poke"))
         return True
 
     def _save_bag(self) -> None:
@@ -478,6 +537,20 @@ class PetWindow(QWidget):
         self._panel.raise_()
         self._panel.activateWindow()
 
+    # ================================================================ 聊天
+
+    def open_chat(self) -> None:
+        """打开聊天窗口。懒建、复用 —— 和 ``open_panel`` 一个规矩。
+
+        真正的调度在 ``ChatController`` 里（谁发请求、失败怎么办、气泡什么时候
+        消失），这一层只留一个能让菜单接得上的方法名。
+        """
+        self.chat.open_window()
+
+    def chat_settings(self) -> None:
+        """聊天设置：API key、人设、清空记忆。"""
+        self.chat.open_settings()
+
     def leaveEvent(self, event) -> None:
         """鼠标离开时顺手把面板上的数字刷一遍。
 
@@ -507,6 +580,7 @@ class PetWindow(QWidget):
         self._album_panel.raise_()
         self._album_panel.activateWindow()
         self._album_panel.refresh()
+        sfxlib.play("open_album")
 
     def pull_card(self) -> Pull | None:
         """抽一次卡。金币够不够、发哪张卡全在 ``Album.pull`` 里判定，
@@ -525,6 +599,7 @@ class PetWindow(QWidget):
         ok, amount, kind = self.album.dissolve(cid)
         if ok:
             self.cfg.save()
+            sfxlib.play("dissolve")
         return ok, amount, kind
 
     def exchange_card(self, tier: str) -> Trade:
@@ -532,6 +607,7 @@ class PetWindow(QWidget):
         trade = self.album.exchange(tier)
         if trade.ok:
             self.cfg.save()
+            sfxlib.play("use_item")
         return trade
 
     def convert_low(self, times: int = 1) -> int:
@@ -539,18 +615,21 @@ class PetWindow(QWidget):
         got = self.album.convert_low(times)
         if got:
             self.cfg.save()
+            sfxlib.play("use_item")
         return got
 
     def equip_card(self, cid: str) -> bool:
         ok = self.album.equip(cid)
         if ok:
             self.cfg.save()
+            sfxlib.play("equip")
         return ok
 
     def unequip_card(self, cid: str) -> bool:
         ok = self.album.unequip(cid)
         if ok:
             self.cfg.save()
+            sfxlib.play("equip")
         return ok
 
     def boost_slot(self) -> bool:
@@ -558,6 +637,7 @@ class PetWindow(QWidget):
         ok = self.album.boost_slot()
         if ok:
             self.cfg.save()
+            sfxlib.play("use_item")
         return ok
 
     def _persist(self) -> None:
@@ -582,6 +662,9 @@ class PetWindow(QWidget):
         now = time.perf_counter()
         dt = now - self._last_tick
         self._last_tick = now
+        # 音效的空闲收尾（长时间没响就把音频设备还回去）。挂在这里而不是
+        # 在 ``pet/sfx.py`` 里起定时器：主循环本来就在跑，这里只是一次比较。
+        sfxlib.tick()
         if dt <= 0:
             return
         self._advance(min(dt, 0.1))
@@ -595,6 +678,9 @@ class PetWindow(QWidget):
         """
         self._tick_vitals(dt)
         self._tick_pomodoro(dt)
+        # 深夜那句。内部 30 秒才真检查一次钟点、一天只说一次 —— 挂在这里
+        # 是因为这是全程序唯一"一直在走"的节拍，为它单开一个 QTimer 不值得。
+        self.chat.maybe_night()
 
         if self._dragging:
             # 拖拽期间由鼠标事件直接决定位置，物理让位
@@ -632,6 +718,19 @@ class PetWindow(QWidget):
         # 撞到屏幕边会弹一下 —— 弹跳是小球的行为，狗走路应该走到边就停。
         if self._flung and ev["landed"]:
             self._end_fling()
+
+        # 落地声。``landed`` 是**边沿触发**（只在"脚离开地面后又沾地"那一帧
+        # 为真，见 ``physics.Motion.update``），所以不会每帧响一次；
+        # 走路时 y 根本不变，也不会误触发 —— 只有真从空中掉下来才出声。
+        if ev["landed"]:
+            sfxlib.play("land")
+
+        # 弹起来的那一下另外给一个更轻的（``land_soft`` 的 gain 是 0.6）。
+        # ``bounced`` 和 ``landed`` 在物理层是**互斥**的两条分支
+        # （还有速度才弹、没速度才判站住），所以这两个音不会同时响。
+        # 被甩出去的狗会连弹两三次，每次都跟落地一样响就成了砸桌子。
+        if ev["bounced"]:
+            sfxlib.play("land_soft")
 
         if ev["edge"] and self.brain.walking:
             self.brain.turn()
@@ -677,6 +776,10 @@ class PetWindow(QWidget):
         self._flung = False
         self.body.edge_bounce = False
         self.body.restitution = self._base_restitution
+        # 落地那一刻吐槽一句。冷却 20 秒：甩一次会连弹两三次，但
+        # ``_end_fling`` 只在第一下落地时进（``self._flung`` 随即变 False），
+        # 这个冷却是防"连着甩、每甩一次都要说一句"。
+        self.chat.note_event("flung")
 
     def _current_set(self) -> str | None:
         """当前状态正在播的是哪一套素材。``None`` = 用默认套。
@@ -833,6 +936,8 @@ class PetWindow(QWidget):
             self.body.throw(0.0, -HOP_SPEED)
         self.cfg.play_count += 1
         self.vitals.play()
+        sfxlib.play("poke")
+        self.chat.note_event("poke")
 
     def feed_plan(self) -> FeedPlan | None:
         """这次「喂一口」会发生什么。返回 ``None`` = 喂不了。
@@ -895,7 +1000,9 @@ class PetWindow(QWidget):
         self._begin_action(State.FEED)
         self.brain.feed(seconds=self._oneshot_seconds(State.FEED))
         self._sync_anim(True)
+        sfxlib.play("feed")
         self.notify.emit("喂饱了", "今天这份免费，下次得从背包里拿")
+        self.chat.note_event("feed")
 
     def nap_plan(self) -> NapPlan:
         """现在叫它睡，会发生什么。菜单那一行和 ``nap()`` 读的是同一份。
@@ -940,7 +1047,9 @@ class PetWindow(QWidget):
             return
         self.brain.sleep_now()
         self._sync_anim(True)
+        sfxlib.play("sleep")
         self.notify.emit("睡着了", f"睡饱大约 {plan.minutes:.0f} 分钟，到点它自己会醒")
+        self.chat.note_event("nap")
 
     def _action_ready(self, key: str) -> bool:
         """连点保护：太密就丢掉这次，免得动作被反复打断。
@@ -1023,12 +1132,19 @@ class PetWindow(QWidget):
         menu.addSeparator()
         menulib.add_kids(menu, self, self.cfg)
         menulib.add_toggles(menu, self.cfg, self)
+        # 音量档位紧跟在「音效」那个勾选后面。音效关着时它整个不出现
+        # （见 ``menu.add_sfx_volume``）—— 菜单里不留点不动的项。
+        menulib.add_sfx_volume(menu, self.cfg, self)
 
         menu.addSeparator()
         # 一层就能点到。名字里不再带"状态"：状态值现在只在菜单顶上那两行看
         # （v2.2.0 把划过弹出的卡片删了，见 pet/panel.py 开头），
         # 这里就是背包 —— 名字和它实际管的东西对上，省得点进去找状态条。
         menu.addAction("背包面板", self.open_panel)
+        # 聊天：入口 + 设置。放在幼儿模式的白名单之外（上面那个 return 之后），
+        # 因为它要开一个**能打字的窗口**，而幼儿模式的遮罩会把它压在底下 ——
+        # 点了没反应比没有这个入口更让人困惑。
+        menulib.add_chat(menu, self, self.cfg)
         menu.addAction("左右翻向（走反了改这个）", self.flip_facing)
         menu.addAction("回到默认位置", self.reset_position)
         menu.addAction("藏进托盘", self.hide)
@@ -1064,6 +1180,43 @@ class PetWindow(QWidget):
         self._apply_window_flags()
         if visible:
             self.show()                          # 改 flags 后必须重 show 才生效
+
+    def set_sfx_enabled(self, on: bool) -> None:
+        """音效总开关。
+
+        **关掉时顺手掐掉正在响的**：不然切开关那一下抽卡音还在拖尾，
+        用户会觉得"明明关掉了还有声音"。这件事在 ``sfxlib.configure`` 里
+        （设成关就归还音频设备），这里不再补一次 ``stop`` —— 两处都管，
+        迟早会出现"一处改了另一处没改"。开着的时候也不补播任何东西：
+        音效是"跟着动作走"的，不是"跟着开关走"的。
+        """
+        self.cfg.sfx_enabled = bool(on)
+        sfxlib.configure(self.cfg.sfx_enabled, self.cfg.sfx_volume)
+        if on:
+            # 关着的时候没预热过（``warmup`` 会直接返回），这会儿补上 ——
+            # 否则"重新打开音效后第一次还是没声"。
+            sfxlib.warmup()
+        self.cfg.save()
+
+    def set_sfx_volume(self, volume: float) -> None:
+        """音效音量（0..1）。
+
+        **调音量时自己响一声**（用「开关」那个短音）：不试听的话，用户
+        只能靠下一次戳它才知道调没调对，而下一个动作未必马上来。
+        """
+        self.cfg.sfx_volume = max(0.0, min(1.0, float(volume)))
+        sfxlib.configure(self.cfg.sfx_enabled, self.cfg.sfx_volume)
+        sfxlib.play("toggle")
+        self.cfg.save()
+
+    def set_chat_enabled(self, on: bool) -> None:
+        """「主动搭话」开关。
+
+        关掉只影响它**自己**开口，聊天窗口照常可用（那是用户主动发起的）。
+        正在飞的那一句会说完 —— 半路掐掉比让它说完更突兀。
+        """
+        self.cfg.chat_enabled = bool(on)
+        self.cfg.save()
 
     def set_paused(self, paused: bool) -> None:
         """小游戏进行时冻结桌面宠物的自主行为，避免两边互相打断。"""
@@ -1118,6 +1271,7 @@ class PetWindow(QWidget):
         except (OSError, ValueError):
             pass                    # 写不进去也不影响本次运行
         self.update()
+        sfxlib.play("toggle")
 
     # ================================================================ 收尾
 
@@ -1130,6 +1284,10 @@ class PetWindow(QWidget):
             self._panel.close()
         if self._album_panel is not None:
             self._album_panel.close()
+        # 聊天：等在飞的请求收尾（最多 1.5 秒）、关掉窗口和气泡。
+        # 放在存盘之前 —— 它不会改 cfg，但"窗口关了、线程还在发信号"
+        # 是退出时最容易崩的那一类。
+        self.chat.shutdown()
         self.cfg.pos_x, self.cfg.pos_y = int(self.body.x), int(self.body.y)
         # 记下"我是什么时候走的" —— 下次启动靠它算离线衰减（见 _load_vitals）。
         # 位置、养成状态、背包也要顺手存一次，否则最后 3 秒的变动会白丢。
@@ -1137,4 +1295,7 @@ class PetWindow(QWidget):
         self._save_vitals()
         self._save_bag()
         self.cfg.save()
+        # 松开音频设备。**不是 ``stop``**：这一走就不回来了，没有"下次还要
+        # 立刻响"这回事，把设备让给别的程序才是该做的（见 pet/sfx.py 的 close）。
+        sfxlib.close()
         super().closeEvent(event)

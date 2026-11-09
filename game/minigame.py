@@ -61,6 +61,7 @@ from game.common import (BG_BOUNCE, GROUND_H, GROUND_Y, HUD_H, W, H, GameWindow,
                          load_background, measure_zone_widest, paint_hud_bar,
                          ui_font, zone_spans)
 from pet.assets import AssetBank
+from pet import sfx as sfxlib
 from pet.physics import Motion
 
 # 版面常量（W / H / HUD_H / GROUND_Y）来自 game.common，两个游戏共用一套 ——
@@ -464,6 +465,9 @@ class MiniGame(GameWindow):
             self.time_left = min(MAX_TIME, self.time_left + self.clear_time_bonus())
             self.round_no += 1
             self._reset_round()
+            # 清屏是这一款最大的正反馈（加分 + 加时），值得单独一个音 ——
+            # 光靠"最后一块碎了"的画面对"整轮过关了"这件事表达不够。
+            sfxlib.play("levelup")
 
     # ------------------------------------------------------------ 敲方块
 
@@ -558,6 +562,9 @@ class MiniGame(GameWindow):
         self.score += gained
         self.pops.append(Pop(blk.body.x + BLOCK_W / 2, blk.body.y + BLOCK_H / 2,
                              text=f"+{gained}", color=blk.color.darker(115)))
+        # 敲中方块。连击时这个音会连着响，所以 ``pet/sfx.py`` 给每个事件备了
+        # 几张牌轮播（不然第二下会把第一声掐掉，"连击"听起来反而断断续续）。
+        sfxlib.play("score")
 
         if blk.hp > 0:
             self._bounce_off(blk)          # 没敲碎：那它就是墙
@@ -607,6 +614,9 @@ class MiniGame(GameWindow):
         self.pops.append(Pop(drop.body.x + DROP_SIZE / 2,
                              drop.body.y + DROP_SIZE / 2,
                              text=drop.kind.title, color=drop.kind.color))
+        # 接道具和打中方块用同一个音：这一款里两者都是"拿到了"，
+        # 分开出声反而让人以为是两种事。
+        sfxlib.play("score")
 
     def _record_best(self) -> None:
         if self.score > self.cfg.best_score:
@@ -616,7 +626,7 @@ class MiniGame(GameWindow):
     def _finish(self, early: bool = False) -> None:
         self.over = True
         self._record_best()
-        earned = self._award_coins()
+        earned = self._award_coins(announce=not early)
         headline = "提前收工" if early else "时间到！"
         self.label_title.setText(f"{headline}　本局得分 {self.score}")
         self.label_sub.setText(

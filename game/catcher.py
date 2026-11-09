@@ -55,6 +55,7 @@ from game.common import (BG_CATCH, GROUND_Y, HUD_H, W, H, GameWindow,
                          load_background, paint_hud_bar, ui_font)
 from pet.paths import game_asset_dir
 from pet.physics import Motion
+from pet import sfx as sfxlib
 
 # ---------------------------------------------------------------- 玩法数值
 
@@ -629,7 +630,7 @@ class CatchGame(GameWindow):
     def _finish(self, early: bool = False) -> None:
         self.over = True
         self._record_best()
-        earned = self._award_coins()
+        earned = self._award_coins(announce=not early)
         headline = "提前收工" if early else "血量耗尽！"
         self.label_title.setText(f"{headline}本局得分 {self.score}")
         self.label_sub.setText(
@@ -785,6 +786,7 @@ class CatchGame(GameWindow):
         if self.combo % COMBO_STEP == 0:          # 连击每满 5 只再来一笔
             self.score += COMBO_BONUS
             self.pops.append(Spark(cx, cy - 26, SPARK_WARM, f"连击 x{self.combo}"))
+        sfxlib.play("score")
 
     def _on_missed(self, f: Faller) -> None:
         cx, cy = f.center
@@ -805,6 +807,9 @@ class CatchGame(GameWindow):
             self.pops.append(Spark(cx, cy, SPARK_HEAL, f"+{BONE_HEAL} 血"))
         else:
             self.pops.append(Spark(cx, cy, SPARK_HEAL, f"+{BONE_SCORE}"))
+        # 骨头用"金币"那个音而不是"得分"：它同时是加分和回血，
+        # 和"接住一只狗"不是一回事，听感上分开才不会混成一串。
+        sfxlib.play("coin")
 
     def _take_damage(self, f: Faller) -> None:
         cx, cy = f.center
@@ -813,6 +818,7 @@ class CatchGame(GameWindow):
         self._hurt = 1.0
         self._shake = 1.0
         self.pops.append(Spark(cx, cy, SPARK_HURT, f"-{DAMAGE_PER_HIT} 血"))
+        sfxlib.play("break")
         if self.hp <= 0:
             self._finish()
 

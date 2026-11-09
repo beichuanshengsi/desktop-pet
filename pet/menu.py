@@ -39,6 +39,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QWidgetAction
 
 from . import kids as kidslib
+from . import sfx as sfxlib
 from .badge_bar import BadgeBar
 from .config import Config
 from .pomodoro import describe
@@ -59,6 +60,11 @@ TOGGLES: tuple[Toggle, ...] = (
     Toggle("auto_walk", "自动漫步", "set_auto_walk"),
     Toggle("gravity", "重力下坠", "set_gravity"),
     Toggle("topmost", "始终置顶", "set_topmost"),
+    Toggle("sfx_enabled", "音效", "set_sfx_enabled"),
+    # 「主动搭话」而不是「聊天」：关掉它只让它不再自己开口，
+    # 「和它聊天」的窗口照样能用（那是用户主动发起的，不是它打扰你）。
+    # 开关名字必须和它的真实作用对上，否则用户会以为关了就整个不能聊了。
+    Toggle("chat_enabled", "主动搭话", "set_chat_enabled"),
 )
 
 
@@ -72,6 +78,12 @@ class ShopItem:
     action: str     #: 买下之后让它演哪个动作（``State`` 的成员值）
     #: 提升哪些值：``((vitals 字段名, 加多少), ...)``
     gains: tuple[tuple[str, float], ...]
+    #: 用掉时记成哪一类聊天事件（空 = 按 ``action`` 走 feed / poke）。
+    #:
+    #: 存在的理由：``feed`` 那条事件带 3 分钟冷却，对随手一口的肉干合适，
+    #: 对 30 金币的豪华大餐就是**花钱还听不到一句**。贵的东西值得单独一类
+    #: 事件、单独一份台词、几乎不设冷却（同 ``flung``：用户刚干的事要趁热说）。
+    event: str = ""
 
 
 #: 商品登记表 —— **加一样东西就在这里加一行**。
@@ -83,7 +95,7 @@ SHOP: tuple[ShopItem, ...] = (
     ShopItem("treat", "肉干", 12, "feed", (("satiety", 35.0),)),
     ShopItem("ball", "玩具球", 18, "poke", (("mood", 35.0),)),
     ShopItem("feast", "豪华大餐", 30, "feed",
-             (("satiety", 50.0), ("mood", 20.0))),
+             (("satiety", 50.0), ("mood", 20.0)), "feast"),
 )
 
 #: 番茄钟的**快捷档位**（秒）—— 加一档就在这里加一个数。
@@ -138,6 +150,9 @@ class _ToggleTarget(Protocol):
     def set_auto_walk(self, on: bool) -> None: ...
     def set_gravity(self, on: bool) -> None: ...
     def set_topmost(self, on: bool) -> None: ...
+    def set_sfx_enabled(self, on: bool) -> None: ...
+    def set_sfx_volume(self, volume: float) -> None: ...
+    def set_chat_enabled(self, on: bool) -> None: ...
 
 
 class _FeedPlan(Protocol):
@@ -226,6 +241,31 @@ def add_interactions(menu: QMenu, pet) -> None:
     plan = pet.feed_plan()
     feed = menu.addAction(feed_text(plan), pet.feed)
     feed.setEnabled(plan is not None)
+
+
+def add_chat(menu: QMenu, pet, cfg: Config) -> QMenu:
+    """「聊天」子菜单：**和它聊天 / 聊天设置**。
+
+    第一行是不可点的状态行 —— "现在到底连没连上"必须一眼看见：
+    没填 key 的时候点「和它聊天」得到的是本地台词，如果不说清楚，
+    用户会以为模型坏了（或者以为自己填的 key 生效了，其实是拼错了）。
+
+    这一块**只在幼儿模式的白名单之外**（见 ``PetWindow._build_menu``）：
+    它要开一个能打字的窗口，而幼儿模式下那窗口会被遮罩压在底下 ——
+    点了没反应比没有这个入口更让人困惑。桌宠照样会自己冒气泡，
+    小朋友玩的部分不受影响。
+    """
+    sub = menu.addMenu("聊天")
+
+    online = bool(cfg.chat_api_key.strip())
+    state = sub.addAction("DeepSeek 已连接" if online
+                          else "离线模式（没填 API key，说本地台词）")
+    state.setEnabled(False)
+    sub.addSeparator()
+
+    sub.addAction("和它聊天", pet.open_chat)
+    sub.addAction("聊天设置…", pet.chat_settings)
+    return sub
 
 
 def add_album(menu: QMenu, pet, cfg: Config) -> list[QAction]:
@@ -445,3 +485,30 @@ def sync_toggles(made: Iterable[tuple[QAction, Toggle]], cfg: Config) -> None:
         act.blockSignals(True)
         act.setChecked(bool(getattr(cfg, item.field)))
         act.blockSignals(False)
+
+
+def add_sfx_volume(menu: QMenu, cfg: Config, target: _ToggleTarget) -> QMenu | None:
+    """「音效音量」子菜单：轻 / 中 / 响三档，勾当前那档。
+
+    返回 ``None`` = 没加（音效关着的时候）。**关着就把这一项整个收掉**，
+    而不是灰着摆一排：一列点不动的档位只会让人以为程序坏了。
+
+    档位清单来自 ``pet/sfx.py`` 的 ``VOLUME_STEPS``，本模块不再写一份数字 ——
+    菜单上写着"中"、存档里存的却是 0.4 这种对不上，就是从这里开始的。
+
+    用 ``setCheckable`` + ``triggered`` 而不是 ``QActionGroup``：这三档的
+    "当前值"是**存档里的一个浮点数**，不是"哪一项被点过"；用互斥组反而要多
+    维护一个"把浮点映射回某一项"的状态，而那份映射已经在 ``volume_label`` 里了。
+    """
+    if not cfg.sfx_enabled:
+        return None
+
+    sub = menu.addMenu("音效音量")
+    current = sfxlib.volume_label(cfg.sfx_volume)
+    for label, value in sfxlib.VOLUME_STEPS:
+        act = QAction(label, sub)
+        act.setCheckable(True)
+        act.setChecked(label == current)
+        act.triggered.connect(lambda _=False, v=value: target.set_sfx_volume(v))
+        sub.addAction(act)
+    return sub

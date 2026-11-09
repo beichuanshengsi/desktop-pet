@@ -67,3 +67,8 @@ dist/
 installer/
 build/
 
+
+# 个人数据 / 密钥，严禁入库
+chat_log.json*
+config.json.bak-*
+locked_pet.cfg

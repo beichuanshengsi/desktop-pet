@@ -14,7 +14,7 @@
 ; 漏了它打出来的安装包没有卡册，而开发态直接读项目根，看不出问题。
 
 #define AppName "小狗桌宠"
-#define AppVer "2.7.0"
+#define AppVer "2.10.2"
 #define AppExe "DesktopPet.exe"
 #define AppPublisher "王蓬"
 

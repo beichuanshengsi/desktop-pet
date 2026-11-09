@@ -84,12 +84,41 @@ GAME_HINTS: list[tuple[str, tuple[str, ...]]] = [
 
 ICON_HINTS = ("icon", "图标", "logo", "标志", "封面", "cover")
 
+# 音效的事件名（canon）就是 ``pet/sfx.py`` 的 ``EVENTS`` 里的 key ——
+# 归好类之后文件名直接就是 ``assets/sfx/<事件名>.wav``，程序不用再对一次表。
+#
+# **顺序仍然即优先级**，而抽卡那四档是这里唯一需要小心的：它们的名字都以
+# ``pull`` 开头，如果普通档的关键词里放了泛化的 "pull"，`pull_legend.wav`
+# 会先撞上它、被归成普通档。所以**具体档排在前面、泛化词只留给兜底那档**。
 SFX_HINTS: list[tuple[str, tuple[str, ...]]] = [
-    ("break", ("break", "碎", "撞", "命中", "hit")),
-    ("score", ("score", "得分", "加分", "计分")),
-    ("levelup", ("levelup", "level_up", "过关", "升级", "结算", "胜利")),
-    ("land", ("land", "落地", "着地", "着落")),
+    # 抽卡：越具体的越先判（见上面的说明）
+    ("pull_rare", ("pull_rare", "pull-rare", "稀有卡", "抽卡稀有")),
+    ("pull_epic", ("pull_epic", "pull-epic", "史诗卡", "抽卡史诗")),
+    ("pull_legend", ("pull_legend", "pull-legend", "传说卡", "抽卡传说")),
+    ("pull_normal", ("pull", "抽卡", "开包", "开卡", "普通卡")),
+    # 互动
     ("poke", ("poke", "单击", "点击", "戳", "click", "回应")),
+    ("feed", ("feed", "喂", "咀嚼", "吃东西", "eat", "chew")),
+    ("land_soft", ("land_soft", "land-soft", "弹跳", "弹起", "bounce")),
+    ("land", ("land", "落地", "着地", "着落")),
+    ("coin", ("coin", "金币", "筹码", "铜板")),
+    ("sleep", ("sleep", "睡着", "打呼", "困")),
+    # 小卖部 / 背包
+    ("buy", ("buy", "购买", "结账", "下单")),
+    ("use_item", ("use_item", "use-item", "用道具", "使用道具")),
+    # 卡册
+    ("open_album", ("open_album", "open-album", "开卡册", "翻开卡册")),
+    ("flip", ("flip", "翻页", "翻卡", "翻书", "滑动", "slide")),
+    ("dissolve", ("dissolve", "分解", "碎片")),
+    ("equip", ("equip", "装备", "装上", "卸下")),
+    # 小游戏
+    ("score", ("score", "得分", "加分", "计分")),
+    ("break", ("break", "碎", "撞", "命中", "hit", "爆炸")),
+    ("levelup", ("levelup", "level_up", "过关", "升级", "结算", "胜利", "通关")),
+    ("game_over", ("game_over", "game-over", "失败", "输了", "游戏结束")),
+    # 作息 / 界面
+    ("pomodoro", ("pomodoro", "番茄", "计时结束", "闹钟", "提醒")),
+    ("toggle", ("toggle", "开关", "切换", "勾选")),
 ]
 
 

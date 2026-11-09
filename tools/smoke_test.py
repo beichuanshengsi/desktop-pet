@@ -27,12 +27,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from PIL import Image                                      # noqa: E402
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt     # noqa: E402
-from PySide6.QtGui import QCloseEvent, QMouseEvent, QWheelEvent  # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt  # noqa: E402
+from PySide6.QtGui import (QCloseEvent, QFontMetrics, QMouseEvent,  # noqa: E402
+                           QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QMenu,        # noqa: E402
                                QPushButton, QWidget)
 
 from pet import __version__                              # noqa: E402
+from pet import chat as chatlib                         # noqa: E402
+from pet import chatui                                    # noqa: E402
 from pet import facing                                   # noqa: E402
 from pet import kids as kidslib                          # noqa: E402
 from pet import menu as menulib                          # noqa: E402
@@ -54,6 +57,7 @@ from pet.vitals import (FEED_GAIN, OFFLINE_FLOOR, PLAY_ENERGY_COST,  # noqa: E40
                         PLAY_GAIN, Vitals)
 from pet.wheel import HOUR, MINUTE, SECOND, WheelModel     # noqa: E402
 from pet.wheel_dialog import DurationDialog                # noqa: E402
+from pet import uitheme                                   # noqa: E402
 from pet.panel import BagPanel                            # noqa: E402
 from pet.window import FeedPlan, PetWindow                # noqa: E402
 from game import COIN_PER_SCORE, GAMES, coins_for, create_game, game_kinds  # noqa: E402
@@ -2877,6 +2881,316 @@ def main() -> int:
               and not any(gone in t for t in shut_titles))
     for kept in ("逗它玩", "卡册", "一起玩游戏"):
         check(f"锁着时菜单里保留「{kept}」", any(kept in t for t in shut_titles))
+
+    # ---------------------------------------------------------- 聊天
+    section("聊天（人设 / 记忆 / 冷却 / 离线台词）")
+
+    # ---- 离线台词：必须有、必须不哑
+    situations = chatlib.offline_situations()
+    check("每个场景都有至少 3 句离线台词",
+          all(len(chatlib.OFFLINE_LINES[s]) >= 3 for s in situations),
+          "、".join(f"{s}:{len(chatlib.OFFLINE_LINES[s])}" for s in situations))
+    rng = random.Random(20261105)
+    first_line = chatlib.pick_offline("chat", rng)
+    nxt_line = first_line
+    for _ in range(20):
+        nxt_line = chatlib.pick_offline("chat", rng, avoid=first_line)
+        if nxt_line == first_line:
+            break
+    check("离线台词尽量不重复上一句", nxt_line != first_line,
+          f"{first_line!r} -> {nxt_line!r}")
+    check("没登记的场景退到通用台词",
+          chatlib.pick_offline("不存在的场景", rng) in chatlib.OFFLINE_LINES["chat"])
+
+    # ---- 冷却：每类事件各记各的，且都必须是正数
+    cd = chatlib.Cooldowns()
+    now = 1000.0
+    check("第一次永远允许开口", cd.ready("hungry", now))
+    cd.mark("hungry", now)
+    check("刚说完一秒内不重复", not cd.ready("hungry", now + 1))
+    check("冷却过后又能说",
+          cd.ready("hungry", now + chatlib.EVENT_COOLDOWNS["hungry"] + 1))
+    check("不同事件各自冷却", cd.ready("flung", now + 1))
+    check("所有冷却都是正数（0 等于没冷却）",
+          all(v > 0 for v in chatlib.EVENT_COOLDOWNS.values()))
+
+    # ---- 快照：数值和钟点要真的进得去提示词
+    snap = chatlib.Snapshot(satiety=27.4, mood=55.6, energy=11.8,
+                            coins=8, state="walk", hour=23)
+    desc = snap.describe()
+    check("快照说得出三条状态与金币",
+          "饱食27" in desc and "心情56" in desc and "金币8" in desc, desc)
+    check("快照认得深夜与动作", "深夜" in desc and "溜达" in desc, desc)
+    check("深夜判定是 23~5 点",
+          chatlib.nightish(23) and chatlib.nightish(3)
+          and not chatlib.nightish(12))
+    check("状态值翻成人话（认不出就说「待着」）",
+          chatlib.state_text("walk") == "溜达"
+          and chatlib.state_text("没见过") == "待着")
+    check("「今天」的标识是到天的", len(chatlib.today_key()) == 10,
+          chatlib.today_key())
+
+    # ---- 提示词：结构、截断、"最近发生的事"要带上
+    log = chatlib.EventLog()
+    log.note("hungry", 100.0)
+    log.note("flung", 101.0)
+    trim_log = chatlib.EventLog()
+    for i in range(50):
+        trim_log.note("feed", float(i))
+    check("事件账本只留最近 N 条",
+          len(trim_log.items) == chatlib.MAX_EVENTS, str(len(trim_log.items)))
+
+    hist = [{"role": "user", "content": f"第{i}句"} for i in range(60)]
+    msgs = chatlib.build_messages("人设X", snap, log, hist, "在吗")
+    check("第一条是 system，且带人设与状态",
+          msgs[0]["role"] == "system"
+          and "人设X" in msgs[0]["content"] and "饱食27" in msgs[0]["content"])
+    check("system 里带上最近发生的事", "被主人甩出去" in msgs[0]["content"])
+    check("最后一条是用户这句话", msgs[-1] == {"role": "user", "content": "在吗"})
+    check("历史按轮数截断",
+          len(msgs) == 1 + chatlib.HISTORY_TURNS * 2 + 1, str(len(msgs)))
+    check("截断保留的是最近的那几句", msgs[-2]["content"] == "第59句")
+
+    body = chatlib.request_body(msgs)
+    check("请求体用统一的模型与上限",
+          body["model"] == chatlib.MODEL
+          and body["max_tokens"] == chatlib.REPLY_MAX_TOKENS)
+    check("能从正常返回里取出回复",
+          chatlib.parse_reply({"choices": [{"message": {"content": " 汪 "}}]}) == "汪")
+    check("畸形返回一律降级成 None",
+          all(chatlib.parse_reply(bad) is None for bad in
+              ({}, {"choices": []}, {"choices": [{"message": {}}]},
+               {"choices": [{"message": {"content": ""}}]})))
+
+    # ---- 对话记忆：落盘、读回、截断、坏档
+    tmp_log = Path(tempfile.mkdtemp()) / "chat_log.json"
+    store = chatlib.ChatStore(path=tmp_log)
+    store.append("user", "你好")
+    store.append("assistant", "汪")
+    store.save()
+    back = chatlib.ChatStore.load(tmp_log)
+    check("聊天记录能落盘并读回", back.history == store.history, str(back.history))
+    for i in range(chatlib.ChatStore.KEEP_TURNS + 10):
+        store.append("user", f"u{i}")
+        store.append("assistant", f"a{i}")
+    check("历史只留最近 N 轮",
+          len(store.history) == chatlib.ChatStore.KEEP_TURNS * 2,
+          str(len(store.history)))
+    check("从头删，尾部是最新的",
+          store.history[-1]["content"] == f"a{chatlib.ChatStore.KEEP_TURNS + 9}")
+    tmp_log.write_text("{ 这不是合法 JSON", encoding="utf-8")
+    check("坏档当没聊过、不崩", chatlib.ChatStore.load(tmp_log).history == [])
+    store.clear()
+    check("清空记忆连事件账本一起清",
+          store.history == [] and store.events.items == [])
+
+    # ---- 存档：老档没有这三个字段也要能读
+    import pet.config as pcfg2
+    chat_cfg_path = Path(tempfile.mkdtemp()) / "cfg.json"
+    pcfg2.config_path = lambda: chat_cfg_path
+    chat_cfg_path.write_text('{"coins": 42}', encoding="utf-8")
+    old_cfg = Config.load()
+    check("老存档没有聊天字段也能读（默认开着主动搭话）",
+          old_cfg.coins == 42 and old_cfg.chat_enabled is True
+          and old_cfg.chat_api_key == "")
+    old_cfg.chat_api_key = "sk-test"
+    old_cfg.chat_persona = "你是一只很乖的狗"
+    old_cfg.save()
+    again = Config.load()
+    check("聊天设置能存回来",
+          again.chat_api_key == "sk-test"
+          and again.chat_persona == "你是一只很乖的狗")
+
+    # ---- 菜单：入口在，状态行说真话，幼儿模式里不给
+    chat_menu = locked_pet._build_menu()
+    chat_sub = next((a.menu() for a in chat_menu.actions() if a.text() == "聊天"), None)
+    # QAction.menu() 在类型存根里返回 QObject，实际是 QMenu，用 isinstance 收窄
+    chat_sub_texts = ([a.text() for a in chat_sub.actions()]
+                      if isinstance(chat_sub, QMenu) else [])
+    check("平时菜单里有「聊天」子菜单", chat_sub is not None)
+    check("子菜单里有「和它聊天」和「聊天设置」",
+          any("和它聊天" in t for t in chat_sub_texts)
+          and any("聊天设置" in t for t in chat_sub_texts), str(chat_sub_texts))
+    check("没填 key 时状态行写「离线模式」",
+          any("离线模式" in t for t in chat_sub_texts), str(chat_sub_texts))
+    locked_pet.cfg.chat_api_key = "sk-looks-filled"
+    chat_filled = next(a.menu() for a in locked_pet._build_menu().actions()
+                       if a.text() == "聊天")
+    check("填了 key 时状态行写「已连接」",
+          isinstance(chat_filled, QMenu)
+          and any("已连接" in t for t in (a.text() for a in chat_filled.actions())))
+    locked_pet.cfg.chat_api_key = ""
+    locked_pet.kids_locked = True
+    kids_titles = _menu_titles(locked_pet._build_menu())
+    locked_pet.kids_locked = False
+    check("幼儿模式里没有「聊天」入口（它要开能打字的窗口）",
+          not any(t == "聊天" for t in kids_titles))
+
+    # ---- 调度：离线能聊、事件记账、关了开关就不冒气泡
+    notes: list[tuple] = []
+
+    class _StubPet:
+        """鸭子类型的假桌宠：调度器只用到这几样，不用造真窗口。"""
+
+        def __init__(self) -> None:
+            self.vitals = Vitals()
+            self.brain = type("B", (), {"state": State.IDLE})()
+            self.notify = type("N", (), {
+                "emit": lambda _self, *a: notes.append(a)})()
+
+        def frameGeometry(self) -> QRect:
+            return QRect(100, 100, 128, 128)
+
+        def isVisible(self) -> bool:
+            return True
+
+    stub = _StubPet()
+    ctl_store = chatlib.ChatStore(path=Path(tempfile.mkdtemp()) / "log.json")
+    chat_ctl = chatui.ChatController(stub, Config(), store=ctl_store,
+                                      rng=random.Random(1))
+    chat_ctl.user_send("在吗")
+    check("离线也能聊：一问一答都进了历史",
+          [m["role"] for m in ctl_store.history[-2:]] == ["user", "assistant"],
+          str(ctl_store.history[-2:]))
+    check("离线回复来自通用台词",
+          ctl_store.history[-1]["content"] in chatlib.OFFLINE_LINES["chat"])
+    before = len(ctl_store.events.items)
+    chat_ctl.note_event("flung")
+    chat_ctl.note_event("feed")
+    check("事件无论说不说都要记账",
+          [k for _t, k in ctl_store.events.items[before:]] == ["flung", "feed"],
+          str(ctl_store.events.items[before:]))
+    check("说完立刻进入冷却（第二次不再开口）",
+          not chat_ctl.cooldowns.ready("flung", chatlib.now_ts()))
+    check("离线事件也会冒气泡", chat_ctl._bubble is not None)
+    check("控制器说话时把跟随接上了（不是只管摆一次）",
+          chat_ctl._bubble is not None
+          and chat_ctl._bubble._anchor_getter is not None)
+
+    # ---- 豪华大餐：单独一类事件，不被肉干的 3 分钟冷却连带吞掉
+    #
+    # 真实反馈过的 bug：先喂了一口（免费或肉干），3 分钟内再用 30 金币的
+    # 豪华大餐 —— 数值涨了、动作演了，但一句话都没有。用户看到的是
+    # "喂大餐没反应"。所以大餐必须自己一类事件、几乎不设冷却。
+    check("商品表里豪华大餐声明了自己的事件",
+          getattr(menulib.shop_item("feast"), "event", "") == "feast",
+          str(menulib.shop_item("feast")))
+    check("大餐有专属台词、标签和短冷却",
+          "feast" in chatlib.OFFLINE_LINES
+          and "feast" in chatlib.EVENT_LABEL
+          and chatlib.EVENT_COOLDOWNS["feast"] <= 10.0,
+          str(chatlib.EVENT_COOLDOWNS["feast"]))
+
+    chat_ctl.cooldowns.mark("feed", chatlib.now_ts())      # 模拟"刚喂过一口"
+    mark_before = len(ctl_store.events.items)
+    chat_ctl.note_event("feast")
+    feast_said = "".join(chat_ctl._bubble._lines) if chat_ctl._bubble else ""
+    check("肉干冷却中喂豪华大餐仍然开口",
+          feast_said in chatlib.OFFLINE_LINES["feast"], feast_said)
+    check("大餐记成 feast 而不是 feed",
+          [k for _t, k in ctl_store.events.items[mark_before:]] == ["feast"],
+          str(ctl_store.events.items[mark_before:]))
+
+    # ---- 账本不能被一件事灌满（每帧重复只记一条）
+    #
+    # 饥饿讨饭曾经每帧记一次：60fps 下 20 条容量全是 hungry，喂饭、被甩
+    # 的记录一条不剩。除了改触发点，账本自己也留了一道 0.5 秒的合并闸。
+    dedupe = chatlib.EventLog()
+    for i in range(30):
+        dedupe.note("hungry", 1000.0 + i * 0.016)
+    check("同一事件每帧重复只记一条（账本不被灌满）",
+          len(dedupe.items) == 1, str(dedupe.items))
+    dedupe.note("hungry", 1000.0 + 0.016 * 30 + 3.0)
+    check("隔开一段时间后同一事件重新记一条", len(dedupe.items) == 2)
+
+    quiet_cfg = Config()
+    quiet_cfg.chat_enabled = False
+    quiet_store = chatlib.ChatStore(path=Path(tempfile.mkdtemp()) / "log.json")
+    quiet_ctl = chatui.ChatController(stub, quiet_cfg, store=quiet_store,
+                                       rng=random.Random(2))
+    quiet_ctl.note_event("feed")
+    check("关了「主动搭话」就不冒气泡（但照样记账）",
+          quiet_ctl._bubble is None and len(quiet_store.events.items) == 1)
+
+    # ---- 气泡与窗口：能离屏造出来、不抢焦点、长句会折行
+    fm = QFontMetrics(uitheme.ui_font(10))
+    lines = chatui._wrap_text("汪" * 60, fm, 200)
+    check("气泡里长句会折行且不超宽",
+          len(lines) > 1 and all(fm.horizontalAdvance(x) <= 200 for x in lines))
+    bubble = chatui.ChatBubble()
+    bubble.speak("汪！本汪在。", QRect(200, 300, 128, 128))
+    check("气泡能离屏显示", bubble.isVisible())
+    check("气泡不吃鼠标也不抢焦点",
+          bubble.focusPolicy() == Qt.FocusPolicy.NoFocus
+          and bubble.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents))
+    bubble.close()
+
+    # ---- 气泡要跟着狗走（v2.10.1）：给了 getter 就按锚点重定位
+    anchor_box = [QRect(200, 300, 128, 128)]
+    follower = chatui.ChatBubble()
+    follower.speak("汪", anchor_box[0], anchor_getter=lambda: anchor_box[0])
+    x_before = follower.x()
+    anchor_box[0] = QRect(700, 300, 128, 128)
+    follower.follow_once()
+    want_x = 700 + 64 - follower.width() // 2
+    check("气泡会跟着狗换位置",
+          follower.x() != x_before and abs(follower.x() - want_x) <= 2,
+          f"{x_before} -> {follower.x()} (期望 {want_x})")
+    check("说话时跟随定时器开着", follower._follow.isActive())
+    follower.close()
+    check("气泡收起后不再跟随（不留后台定时器）", not follower._follow.isActive())
+
+    # ---- 台词不许带刺（v2.10.1 的基调：傲娇但心软）
+    harsh = ("良心不会痛", "不然没完", "啃鼠标", "眼睛还要不要",
+             "喂！", "算你有良心")
+    all_lines = [line for lines in chatlib.OFFLINE_LINES.values() for line in lines]
+    hit = [line for line in all_lines if any(word in line for word in harsh)]
+    check("离线台词里没有带刺的句子", not hit, "、".join(hit))
+    check("默认人设明确写了不许凶",
+          "不许凶" in chatlib.DEFAULT_PERSONA
+          and "不许命令" in chatlib.DEFAULT_PERSONA)
+
+    win = chatui.ChatWindow(chat_ctl)
+    check("聊天窗口的说明写着离线模式", "离线模式" in win.hint.text(), win.hint.text())
+    win.input.setText("你今天怎么样")
+    win._send()
+    check("窗口发送后一问一答都进了历史",
+          ctl_store.history[-2]["content"] == "你今天怎么样")
+    win.close()
+    chat_ctl.shutdown()
+    quiet_ctl.shutdown()
+
+    # ---- 真窗口上的钩子：戳一下要真的记成一次事件
+    live_pet = PetWindow(Config(), bank, GAMES)
+    live_pet.poke()
+    check("真窗口里戳一下会记进事件账本",
+          any(k == "poke" for _t, k in live_pet.chat.store.events.items),
+          str(live_pet.chat.store.events.items[-3:]))
+
+    # 「饿到讨饭」这件事以前靠 ``brain.seeking`` 判断"已经在去了"，可它
+    # 本来就站在屏幕中间时 start_seek 当帧就被判成"到了"，于是每一帧都记
+    # 一笔。这里连按 20 帧模拟那种情形。
+    live_pet.vitals.satiety = 1.0
+    for _ in range(20):                       # 把 poke 那个动作播完，回到 IDLE
+        live_pet.brain.update(0.1, on_ground=True)
+    live_pet.brain.stop_seek()
+    # 账本满 20 条时"长度差"恒为 0（满了就顶掉最旧那条），先清空再数
+    live_pet.chat.store.events.items.clear()
+    n0 = len(live_pet.chat.store.events.items)
+    for _ in range(20):
+        live_pet._steer_if_hungry()
+    hungry_n = sum(1 for _t, k in live_pet.chat.store.events.items[n0:]
+                   if k == "hungry")
+    check("饿着的时候讨饭只记一次（不是每帧一次）",
+          hungry_n == 1, f"20 帧里记了 {hungry_n} 次")
+
+    # 吃大餐：真窗口这条路也要落在 feast 上
+    live_pet.bag.add("feast")
+    live_pet.use_item("feast")
+    check("真窗口里用豪华大餐记成 feast 事件",
+          live_pet.chat.store.events.items[-1][1] == "feast",
+          str(live_pet.chat.store.events.items[-3:]))
+    live_pet.close()
 
     # ---------------------------------------------------------- 版本号
     section("版本号")

@@ -16,7 +16,7 @@ assets/
 ├── icon.png / icon.ico      应用图标（托盘 / 窗口 / 任务栏；由当前素材裁头部生成）
 ├── pet/                     宠物动作帧             → pet/README.md
 ├── game/                    小游戏素材（两张背景 + 小黄狗 + 三套小白狗）→ game/README.md
-├── sfx/                     音效（可选；当前完全静音）
+├── sfx/                     音效（22 个事件；可在菜单里调音量或关闭）→ sfx/README.md
 ├── fonts/                   内置字体（可选；当前用系统字体回退链）
 └── raw/                     原始素材与素材库       → raw/README.md
     ├── inbox/               投递口：下载来的 GIF 先丢这里

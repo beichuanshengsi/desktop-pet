@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (QButtonGroup, QFrame, QGridLayout, QHBoxLayout,
                                QLabel, QPushButton, QToolButton, QVBoxLayout,
                                QWidget)
 
+from . import sfx as sfxlib
 from . import uitheme
 from .cards import COST, EQUIP_SLOTS, Card, TIERS
 from .config import Config
@@ -412,6 +413,7 @@ class AlbumPanel(QWidget):
         if 0 <= page < self._page_count():
             self._page = page
             self.refresh()
+            sfxlib.play("flip")
 
     # ------------------------------------------------------------ 交互
 
@@ -439,6 +441,10 @@ class AlbumPanel(QWidget):
         tag = "新收集！" if pull.is_new else f"重复（已有 {pull.dup_count} 张）"
         self.result.setText(f"抽到 {self._label(pull.card)}　{tag}")
         self._focus(pull.card.id)
+        # 声音按稀有度分四档，和浮层的粒子/光环是同一套梯度（见 ``pet/sfx.py``
+        # 的 ``TIER_EVENT``）。**播音放在这一层而不是浮层里**：``CardReveal``
+        # 是纯绘制的显示控件，让它出声就没人能单独把它拿出来截图验收了。
+        sfxlib.play_for_tier(pull.card.tier)
         # 翻牌浮层压轴出场 —— 它是这一下唯一抢眼的东西，也是整套系统里唯一
         # 能让人"当场看出稀有度"的反馈（图鉴里的配色是静态的）。
         self.reveal.show_card(pull.card, self._label(pull.card),

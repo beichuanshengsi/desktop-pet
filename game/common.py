@@ -27,6 +27,7 @@ from pet.uitheme import FONT_STACK, ui_font            # noqa: F401
 #: 装备加成。**四个游戏都从这一个函数取** —— 加成规则只写在 ``pet/cards.py``
 #: 一份，各游戏自己算一份的话，迟早出现"打弹跳得分能吃到加成、打 2048 吃不到"，
 #: 而玩家一定会挑那个更划算的玩。
+from pet import sfx as sfxlib
 from pet.cards import coins_with_bonus
 
 # ---------------------------------------------------------------- 版面
@@ -465,7 +466,7 @@ class GameWindow(QWidget):
             "直接退出的话，这一局打的分数就白打了。\n"
             "可以按现在的分数结算拿金币，也可以先暂停、回头再从右键菜单接着玩。")
 
-    def _award_coins(self) -> int:
+    def _award_coins(self, announce: bool = True) -> int:
         """把本局该得的金币记进存档，返回这一局挣了多少（**含装备加成**）。
 
         放底座里、由 ``_finish()`` 与 ``_settle_early()`` 调，而不是各游戏各写
@@ -478,6 +479,16 @@ class GameWindow(QWidget):
         汇率是"分 → 金币"的换算，加成是"玩家资产带来的额外收益"。两件事混在
         一起的话，"卸下装备之后汇率是多少"就说不清了，而且
         ``coins_for`` 是个纯函数，被测试和 HUD 到处引用。
+
+        ``announce`` 决定**要不要响收尾音**。默认响；``_settle_early`` 那条路
+        （玩家按 Esc 收工、换游戏、退出程序）传假。
+
+        这个参数是补上去的，原因值得记一笔：收尾音一开始是挂在"唯一入账点"
+        上的，想着四款游戏就都不用各写一遍。但入账点同时也是**提前收局**的
+        必经之路，于是"换个游戏玩"会平白响一声结算音 —— 得分为 0 时响的还是
+        ``game_over``（一个失败音），而玩家根本没输。用户的原话是
+        "**没点它自己也出声**"。音效只能跟着"玩家看得见的那件事"走，
+        不能跟着"代码里恰好共用的那个函数"走。
         """
         base = self._round_coins()
         earned, self._bonus_rate = coins_with_bonus(self.cfg, base)
@@ -485,6 +496,10 @@ class GameWindow(QWidget):
         if earned:
             self.cfg.coins += earned
             self.cfg.save()
+        if announce:
+            # 判据用分数而不是金币：2048 是按最大格子折算的（见
+            # ``coins_for_tile``），拿金币判"这局算不算白打"在那款上会反。
+            sfxlib.play("levelup" if self.score > 0 else "game_over")
         return earned
 
     def coins_note(self) -> str:

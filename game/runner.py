@@ -62,6 +62,7 @@ from game.common import (BG_RUNNER, GROUND_H, GROUND_Y, HUD_H, W, H, GameWindow,
                          load_background, measure_zone_widest, paint_hud_bar,
                          ui_font, zone_spans)
 from pet.assets import AssetBank
+from pet import sfx as sfxlib
 
 # ================================================================ 玩法数值
 
@@ -509,6 +510,7 @@ class Runner(GameWindow):
         # ---- 撞了就结束
         if self.collides():
             self._flash = 1.0
+            sfxlib.play("break")
             self._finish()
 
     def _settle(self, dt: float) -> None:
@@ -530,7 +532,7 @@ class Runner(GameWindow):
     def _finish(self, early: bool = False) -> None:
         self.over = True
         self._record_best()
-        earned = self._award_coins()
+        earned = self._award_coins(announce=not early)
         headline = "提前收工" if early else "撞上了！"
         self.label_title.setText(f"{headline}跑了 {self.score} 分")
         self.label_sub.setText(
